@@ -65,10 +65,10 @@ wsrep_sst_method=rsync
 EOL
 
 _term() {
-  set -x
-  echo "Caught SIGTERM signal!"
-  kill -TERM "$pid" 2>/dev/null
-  wait $pid
+    set -x
+    echo "Caught SIGTERM signal!"
+    kill -TERM "$pid" 2>/dev/null
+    wait $pid
 }
 
 trap _term SIGTERM
