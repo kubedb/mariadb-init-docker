@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 
 # Environment variables passed from Pod env are as follows:
+#
 #   CLUSTER_NAME = name of the mariadb cr
 #   MYSQL_ROOT_USERNAME = root user name of the mariadb database server
 #   MYSQL_ROOT_PASSWORD = root password of the mariadb database server
+#   HOST_ADDRESS        = Address used to communicate among the peers. This can be fully qualified host name or IPv4 or IPv6
+#   HOST_ADDRESS_TYPE   = Address type of HOST_ADDRESS (one of DNS, IPV4, IPv6)
+#   POD_IP              = IP address used to create whitelist CIDR. For HOST_ADDRESS_TYPE=DNS, it will be status.PodIP.
+#   POD_IP_TYPE         = Address type of POD_IP (one of IPV4, IPv6)
+
+env | sort | grep "POD\|HOST\|NAME"
 
 script_name=${0##*/}
 
@@ -22,26 +29,21 @@ if [ -z "$CLUSTER_NAME" ]; then
     exit 1
 fi
 
-# get the host names from stdin sent by peer-finder program
-cur_hostname=$(hostname)
+cur_host=$(echo -n ${HOST_ADDRESS%.svc*})
+log "INFO" "I am $cur_host"
 
-export cur_host=
 log "INFO" "Reading standard input..."
 while read -ra line; do
-    if [[ "${line}" == *"${cur_hostname}"* ]]; then
-        cur_host=$(echo -n ${line%.svc*})
-    fi
     tmp=$(echo -n ${line%.svc*})
+    if [[ "$HOST_ADDRESS_TYPE" == "IPv6" ]]; then
+        tmp="[$tmp]"
+    fi
     peers=("${peers[@]}" "$tmp")
-
 done
-
 log "INFO" "Trying to start group with peers'${peers[*]}'"
 
 # comma separated host names
 export hosts=$(echo -n ${peers[*]} | sed -e "s/ /,/g")
-myips=$(hostname -I)
-first=${myips%% *}
 
 # write on galera configuration file
 cat >>/etc/mysql/conf.d/galera.cnf <<EOL
@@ -60,20 +62,9 @@ wsrep_cluster_name=$CLUSTER_NAME
 wsrep_cluster_address="gcomm://${hosts}"
 
 # Galera Synchronization Configuration
-wsrep_node_address=${first}
+wsrep_node_address=${POD_IP}
 wsrep_sst_method=rsync
 EOL
-
-_term() {
-    set -x
-    echo "Caught SIGTERM signal!"
-    kill -TERM "$pid" 2>/dev/null
-    wait $pid
-}
-
-trap _term SIGTERM
-
-ls -l /var/lib/mysql
 
 host_len=${#peers[@]}
 
@@ -106,7 +97,7 @@ for host in ${peers[*]}; do
         fi
         out=$(mysql -u${MYSQL_ROOT_USERNAME} -p${MYSQL_ROOT_PASSWORD} --host=${host} ${tlsCred} -N -e "select 1;" 2>/dev/null)
         echo $out
-        log "INFO" "=======trying to ping ***'$host'***, Step='$i', Got='$out'"
+        log "INFO" "Trying to ping ***'$host'***, Step='$i', Got='$out'"
         if [[ "$out" == "1" ]]; then
             break
         fi
