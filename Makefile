@@ -3,7 +3,7 @@ SHELL=/bin/bash -o pipefail
 REGISTRY ?= kubedb
 BIN      := mariadb-init
 IMAGE    := $(REGISTRY)/$(BIN)
-TAG      := 0.1.0
+TAG      := $(shell git describe --exact-match --abbrev=0 2>/dev/null || echo "")
 
 
 .PHONY: push
