@@ -66,6 +66,10 @@ wsrep_node_address=${POD_IP}
 wsrep_sst_method=rsync
 EOL
 
+# include directory in my.cnf for custom-config
+mkdir /etc/mysql/custom.conf.d/
+echo '!includedir /etc/mysql/custom.conf.d/' >> /etc/mysql/my.cnf
+
 host_len=${#peers[@]}
 
 if [[ $host_len -eq 1 ]]; then
