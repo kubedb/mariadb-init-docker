@@ -70,54 +70,55 @@ EOL
 mkdir /etc/mysql/custom.conf.d/
 echo '!includedir /etc/mysql/custom.conf.d/' >> /etc/mysql/my.cnf
 
-host_len=${#peers[@]}
-
-if [[ $host_len -eq 1 ]]; then
-    # Starting with provider version 3.19, Galera has an additional protection against attempting to boostrap the cluster using a node
-    # that may not have been the last node remaining in the cluster prior to cluster shutdown.
-    # ref: https://galeracluster.com/library/training/tutorials/restarting-cluster.html#restarting-the-cluster
-    sed -i -e 's/safe_to_bootstrap: 0/safe_to_bootstrap: 1/g' /var/lib/mysql/grastate.dat
-    log "INFO" "Creating new cluster using --wsrep-new-cluster"
-    docker-entrypoint.sh mysqld --wsrep-new-cluster $@ &
-    # saving the process id running in background for further process...
-    pid=$!
-else
-    # DATABASE_ALREADY_EXISTS=true skips database initialization for newly added nodes in cluster.
-    export DATABASE_ALREADY_EXISTS=true
-
-    log "INFO" "Adding new node ***'$cur_host'*** to the cluster"
-    docker-entrypoint.sh mysqld $@ &
-    # saving the process id running in background for further process...
-    pid=$!
-fi
-
-args=$@
-# wait for all mysql servers be running (alive)
-for host in ${peers[*]}; do
-    for i in {900..0}; do
-        tlsCred=""
-        if [[ "$args" == *"--require-secure-transport"* ]]; then
-            tlsCred="--ssl-ca=/etc/mysql/certs/client/ca.crt  --ssl-cert=/etc/mysql/certs/client/tls.crt --ssl-key=/etc/mysql/certs/client/tls.key"
-        fi
-        out=$(mysql -u${MYSQL_ROOT_USERNAME} -p${MYSQL_ROOT_PASSWORD} --host=${host} ${tlsCred} -N -e "select 1;" 2>/dev/null)
-        echo $out
-        log "INFO" "Trying to ping ***'$host'***, Step='$i', Got='$out'"
-        if [[ "$out" == "1" ]]; then
-            break
-        fi
-        echo -n .
-        sleep 1
-    done
-    if [[ "$i" == "0" ]]; then
-        echo ""
-        log "ERROR" "Failed to start the Server = ${host} ..."
-        exit 1
-    fi
-done
-
-log "INFO" "All servers are ready -> (${peers[*]})"
-
-# wait for mysqld process running in background
-log "INFO" "SUCCESS: mysqld process [pid = '$pid'] running in background ..."
-
-wait $pid
+sleep 5000 &
+#host_len=${#peers[@]}
+#
+#if [[ $host_len -eq 1 ]]; then
+#    # Starting with provider version 3.19, Galera has an additional protection against attempting to boostrap the cluster using a node
+#    # that may not have been the last node remaining in the cluster prior to cluster shutdown.
+#    # ref: https://galeracluster.com/library/training/tutorials/restarting-cluster.html#restarting-the-cluster
+#    sed -i -e 's/safe_to_bootstrap: 0/safe_to_bootstrap: 1/g' /var/lib/mysql/grastate.dat
+#    log "INFO" "Creating new cluster using --wsrep-new-cluster"
+#    #docker-entrypoint.sh mysqld --wsrep-new-cluster $@ &
+#    # saving the process id running in background for further process...
+#    pid=$!
+#else
+#    # DATABASE_ALREADY_EXISTS=true skips database initialization for newly added nodes in cluster.
+#    export DATABASE_ALREADY_EXISTS=true
+#
+#    log "INFO" "Adding new node ***'$cur_host'*** to the cluster"
+#    #pro
+#    # saving the process id running in background for further process...
+#    pid=$!
+#fi
+#
+#args=$@
+## wait for all mysql servers be running (alive)
+#for host in ${peers[*]}; do
+#    for i in {900..0}; do
+#        tlsCred=""
+#        if [[ "$args" == *"--require-secure-transport"* ]]; then
+#            tlsCred="--ssl-ca=/etc/mysql/certs/client/ca.crt  --ssl-cert=/etc/mysql/certs/client/tls.crt --ssl-key=/etc/mysql/certs/client/tls.key"
+#        fi
+#        out=$(mysql -u${MYSQL_ROOT_USERNAME} -p${MYSQL_ROOT_PASSWORD} --host=${host} ${tlsCred} -N -e "select 1;" 2>/dev/null)
+#        echo $out
+#        log "INFO" "Trying to ping ***'$host'***, Step='$i', Got='$out'"
+#        if [[ "$out" == "1" ]]; then
+#            break
+#        fi
+#        echo -n .
+#        sleep 1
+#    done
+#    if [[ "$i" == "0" ]]; then
+#        echo ""
+#        log "ERROR" "Failed to start the Server = ${host} ..."
+#        exit 1
+#    fi
+#done
+#
+#log "INFO" "All servers are ready -> (${peers[*]})"
+#
+## wait for mysqld process running in background
+#log "INFO" "SUCCESS: mysqld process [pid = '$pid'] running in background ..."
+#
+#wait $pid
