@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
 
-# Environment variables passed from Pod env are as follows:
-#
-#   CLUSTER_NAME = name of the mariadb cr
-#   MYSQL_ROOT_USERNAME = root user name of the mariadb database server
-#   MYSQL_ROOT_PASSWORD = root password of the mariadb database server
-#   HOST_ADDRESS        = Address used to communicate among the peers. This can be fully qualified host name or IPv4 or IPv6
-#   HOST_ADDRESS_TYPE   = Address type of HOST_ADDRESS (one of DNS, IPV4, IPv6)
-#   POD_IP              = IP address used to create whitelist CIDR. For HOST_ADDRESS_TYPE=DNS, it will be status.PodIP.
-#   POD_IP_TYPE         = Address type of POD_IP (one of IPV4, IPv6)
-
-env | sort | grep "POD\|HOST\|NAME"
-
 script_name=${0##*/}
 
 function timestamp() {
@@ -24,15 +12,10 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
-if [ -z "$CLUSTER_NAME" ]; then
-    echo >&2 'Error:  You need to specify CLUSTER_NAME'
-    exit 1
-fi
-
 cur_host=$(echo -n ${HOST_ADDRESS%.svc*})
 log "INFO" "I am $cur_host"
 
-log "INFO" "Reading standard input..."
+log "INFO" "Reading standard input from peer-finder..."
 while read -ra line; do
     tmp=$(echo -n ${line%.svc*})
     if [[ "$HOST_ADDRESS_TYPE" == "IPv6" ]]; then
@@ -43,6 +26,12 @@ done
 log "INFO" "Trying to start group with peers'${peers[*]}'"
 
 cat <<<"${peers[*]}" >/scripts/peer-list.txt
+
+log "VALO koira dekh" "First peer-finder passed"
+
+## find peers, configure galera and add custom config
+#/scripts/peer-finder -service=${GOVERNING_SERVICE_NAME} -on-start scripts/on-start.sh
+
 
 # comma separated host names
 export hosts=$(echo -n ${peers[*]} | sed -e "s/ /,/g")
@@ -67,6 +56,16 @@ wsrep_cluster_address="gcomm://${hosts}"
 wsrep_node_address=${POD_IP}
 wsrep_sst_method=rsync
 EOL
+
+FILE=/run-script/run-on-present.sh
+
+# wait for the script copied by coordinator
+while [ ! -f "$FILE" ]; do
+    log "WARNING" "run-on-present script is not present yet"
+    sleep 1
+done
+
+log "INFO" "found run-on-present script"
 
 # include directory in my.cnf for custom-config
 mkdir /etc/mysql/custom.conf.d/
