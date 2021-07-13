@@ -10,7 +10,7 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
-export line=$(docker-entrypoint.sh mysqld --wsrep-recover 2>&1 | grep "Recovered position:" | xargs echo) && echo -n ${line##*:} > /scripts/seqno
+export line=$(docker-entrypoint.sh mysqld --wsrep-recover 2>&1 | grep "Recovered position:" | xargs echo) && echo -n ${line##*:} >/scripts/seqno
 
 FILE=/run-script/after-run-on-present.sh
 
@@ -24,5 +24,3 @@ log "INFO" "found after-run-on-present script"
 
 # run the script copied by mariadb-coordinator
 ./run-script/after-run-on-present.sh
-
-
