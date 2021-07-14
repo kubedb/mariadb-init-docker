@@ -48,6 +48,17 @@ EOL
 mkdir /etc/mysql/custom.conf.d/
 echo '!includedir /etc/mysql/custom.conf.d/' >>/etc/mysql/my.cnf
 
+# wait for the pre script copied by coordinator
+while [ ! -f "/run-script/pre-run-on-present.sh" ]; do
+    log "WARNING" "pre-run-on-present script is not present yet"
+    sleep 1
+done
+
+log "INFO" "found pre-run-on-present script"
+
+# run the pre script copied by mariadb-coordinator
+./run-script/pre-run-on-present.sh
+
 # wait for the script copied by coordinator
 while [ ! -f "/run-script/run-on-present.sh" ]; do
     log "WARNING" "run-on-present script is not present yet"
