@@ -17,6 +17,7 @@ container:
 	chmod +x init-script/run.sh
 	find $$(pwd)/scripts -type f -exec chmod +x {} \;
 	docker build --pull -t $(IMAGE):$(TAG) .
+	rm tini
 
 .PHONY: version
 version:
