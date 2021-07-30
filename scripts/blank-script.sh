@@ -10,4 +10,4 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
-log "INFO" "blank script run successful"
+log "INFO" "blank pre-run-on-present script run successful"
