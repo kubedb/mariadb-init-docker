@@ -68,4 +68,4 @@ done
 log "INFO" "found run-on-present script"
 
 # run the script copied by mariadb-coordinator
-./run-script/run-on-present.sh
+./run-script/run-on-present.sh $@
