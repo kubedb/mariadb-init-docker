@@ -11,4 +11,4 @@ function log() {
 }
 
 export DATABASE_ALREADY_EXISTS=true
-docker-entrypoint.sh mysqld
+docker-entrypoint.sh mysqld $@
