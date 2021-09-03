@@ -13,10 +13,13 @@ function log() {
 }
 
 # wait for the peer-list file created by coordinator
+log "WARNING" "waiting for peer-list file to come"
 while [ ! -f "/scripts/peer-list" ]; do
-    log "WARNING" "peer-list is not created yet"
     sleep 1
 done
+
+log "INFO" "found peer-list file"
+
 
 # get the comma separated peer names for galera.cnf file
 hosts=$(cat "/scripts/peer-list")
@@ -49,8 +52,8 @@ mkdir /etc/mysql/custom.conf.d/
 echo '!includedir /etc/mysql/custom.conf.d/' >>/etc/mysql/my.cnf
 
 # wait for the pre script copied by coordinator
+log "WARNING" "waiting for pre-run-on-present script to come"
 while [ ! -f "/run-script/pre-run-on-present.sh" ]; do
-    log "WARNING" "pre-run-on-present script is not present yet"
     sleep 1
 done
 
@@ -60,12 +63,12 @@ log "INFO" "found pre-run-on-present script"
 ./run-script/pre-run-on-present.sh
 
 # wait for the script copied by coordinator
+log "WARNING" "waiting for run-on-present script to come"
 while [ ! -f "/run-script/run-on-present.sh" ]; do
-    log "WARNING" "run-on-present script is not present yet"
     sleep 1
 done
 
 log "INFO" "found run-on-present script"
 
-# run the script copied by mariadb-coordinator
+# run the script copied by mariadb-coordinator and pass the arguments
 ./run-script/run-on-present.sh $@
