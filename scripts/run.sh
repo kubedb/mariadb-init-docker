@@ -20,7 +20,6 @@ done
 
 log "INFO" "found peer-list file"
 
-
 # get the comma separated peer names for galera.cnf file
 hosts=$(cat "/scripts/peer-list")
 
