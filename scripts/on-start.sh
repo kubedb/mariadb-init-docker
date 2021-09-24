@@ -47,12 +47,10 @@ wsrep_sst_method=rsync
 EOL
 
 # include directory in my.cnf for custom-config
-if [ ! -d "/etc/mysql/custom.conf.d/" ]
-then
+if [ ! -d "/etc/mysql/custom.conf.d/" ]; then
     mkdir /etc/mysql/custom.conf.d/
     echo '!includedir /etc/mysql/custom.conf.d/' >>/etc/mysql/my.cnf
 fi
-
 
 # wait for the pre script copied by coordinator
 log "WARNING" "waiting for pre-run-on-present script to come"
