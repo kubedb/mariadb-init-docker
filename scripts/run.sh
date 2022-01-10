@@ -12,6 +12,11 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
+# include directory in my.cnf for custom-config
+if [ ! -z "$(ls -A /etc/mysql/custom.conf.d/)" ]; then
+    echo '!includedir /etc/mysql/custom.conf.d/' >>/etc/mysql/my.cnf
+fi
+
 while [ true ]; do
     log "INFO" "initializing run.sh"
 
