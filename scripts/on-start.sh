@@ -43,7 +43,9 @@ wsrep_cluster_address="gcomm://${hosts}"
 
 # Galera Synchronization Configuration
 wsrep_node_address=${POD_IP}
-wsrep_sst_method=rsync
+wsrep_sst_method=mariabackup
+wsrep_sst_auth=$MYSQL_ROOT_USERNAME:$MYSQL_ROOT_PASSWORD
+wsrep_sst_donor=all,  # https://mariadb.com/kb/en/mariabackup-sst-method/#choosing-a-donor-node
 EOL
 
 # wait for the pre script copied by coordinator
