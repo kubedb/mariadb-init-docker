@@ -46,13 +46,11 @@ wsrep_node_address=${POD_IP}
 EOL
 
 if [[ $WSREP_SST_METHOD == "rsync" ]];then
-  echo "wsrep_sst_method=rsync
-" >> /etc/mysql/conf.d/galera.cnf
+  echo "wsrep_sst_method=rsync" >> /etc/mysql/conf.d/galera.cnf
 elif [[ $WSREP_SST_METHOD == "mariabackup" ]];then
   echo "wsrep_sst_method=mariabackup
 wsrep_sst_auth=$MYSQL_ROOT_USERNAME:$MYSQL_ROOT_PASSWORD
-wsrep_sst_donor=all,  # https://mariadb.com/kb/en/mariabackup-sst-method/#choosing-a-donor-node
-" >> /etc/mysql/conf.d/galera.cnf
+wsrep_sst_donor=all,  # https://mariadb.com/kb/en/mariabackup-sst-method/#choosing-a-donor-node" >> /etc/mysql/conf.d/galera.cnf
 fi
 
 # wait for the pre script copied by coordinator
