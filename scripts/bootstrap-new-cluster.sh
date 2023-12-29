@@ -10,4 +10,9 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
-docker-entrypoint.sh mysqld --wsrep-new-cluster $@
+if [[ $MARIADB_VERSION == "1:11"* ]];
+then
+    docker-entrypoint.sh mariadbd --wsrep-new-cluster $@
+else
+    docker-entrypoint.sh mysqld --wsrep-new-cluster $@
+fi

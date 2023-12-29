@@ -10,4 +10,9 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
-export line=$(docker-entrypoint.sh mysqld --wsrep-recover 2>&1 | grep "Recovered position:" | xargs echo) && echo -n ${line##*:} >/scripts/seqno
+if [[ $MARIADB_VERSION == "1:11"* ]];
+then
+    export line=$(docker-entrypoint.sh mariadbd --wsrep-recover 2>&1 | grep "Recovered position:" | xargs echo) && echo -n ${line##*:} >/scripts/seqno
+else
+    export line=$(docker-entrypoint.sh mysqld --wsrep-recover 2>&1 | grep "Recovered position:" | xargs echo) && echo -n ${line##*:} >/scripts/seqno
+fi

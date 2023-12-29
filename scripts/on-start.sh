@@ -26,7 +26,28 @@ hosts=$(cat "/scripts/peer-list")
 log "INFO" "hosts are {$hosts}"
 
 # write on galera configuration file
-cat >>/etc/mysql/conf.d/galera.cnf <<EOL
+if [[ $MARIADB_VERSION == "1:11"* ]];
+then
+    cat >>/etc/mysql/conf.d/galera.cnf <<EOL
+[mariadbd]
+binlog_format=ROW
+default-storage-engine=innodb
+innodb_autoinc_lock_mode=2
+bind-address=0.0.0.0
+
+# Galera Provider Configuration
+wsrep_on=ON
+wsrep_provider=/usr/lib/galera/libgalera_smm.so
+
+# Galera Cluster Configuration, Add the list of peers in wrsep_cluster_address
+wsrep_cluster_name=$CLUSTER_NAME
+wsrep_cluster_address="gcomm://${hosts}"
+
+# Galera Synchronization Configuration
+wsrep_node_address=${POD_IP}
+EOL
+else
+    cat >>/etc/mysql/conf.d/galera.cnf <<EOL
 [mysqld]
 binlog_format=ROW
 default-storage-engine=innodb
@@ -44,6 +65,7 @@ wsrep_cluster_address="gcomm://${hosts}"
 # Galera Synchronization Configuration
 wsrep_node_address=${POD_IP}
 EOL
+fi
 
 if [[ $WSREP_SST_METHOD == "rsync" ]]; then
     echo "wsrep_sst_method=rsync" >>/etc/mysql/conf.d/galera.cnf
