@@ -12,9 +12,8 @@ function log() {
 
 export DATABASE_ALREADY_EXISTS=true
 
-if [[ $MARIADB_VERSION == "1:11"* ]];
-then
-  docker-entrypoint.sh mariadbd $@
+if [[ $MARIADB_VERSION == "1:11"* ]]; then
+    docker-entrypoint.sh mariadbd $@
 else
-  docker-entrypoint.sh mysqld $@
+    docker-entrypoint.sh mysqld $@
 fi

@@ -26,8 +26,7 @@ hosts=$(cat "/scripts/peer-list")
 log "INFO" "hosts are {$hosts}"
 
 # write on galera configuration file
-if [[ $MARIADB_VERSION == "1:11"* ]];
-then
+if [[ $MARIADB_VERSION == "1:11"* ]]; then
     cat >>/etc/mysql/conf.d/galera.cnf <<EOL
 [mariadbd]
 binlog_format=ROW
