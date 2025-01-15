@@ -31,6 +31,6 @@ while [ true ]; do
     fi
 
     # start on-start script
-    ./scripts/on-start.sh $@
+    ./scripts/repl-on-start.sh $@
     sleep 1
 done

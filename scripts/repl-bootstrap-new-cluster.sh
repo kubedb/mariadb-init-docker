@@ -10,6 +10,11 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
+
+echo "\n\n\nthis file is running\n\n\n\n"
+
+args=$@
+
 # wait for mysql daemon be running (alive)
 function wait_for_mysqld_running() {
     local mysql="$mysql_header --host=$localhost"
@@ -49,9 +54,7 @@ function create_replication_user() {
         retry 120 ${mysql} -N -e "CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;"
         retry 120 ${mysql} -N -e "GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
         retry 120 ${mysql} -N -e "FLUSH PRIVILEGES;"
-        retry 120 ${mysql} -N -e "FLUSH PRIVILEGES;"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
-        retry 120 ${mysql} -N -e "RESET SLAVE ALL;"
     else
         log "INFO" "Replication user exists. Skipping creating new one......."
     fi
@@ -111,17 +114,18 @@ function create_monitor_user() {
 }
 export pid
 function start_mysqld_in_background() {
-    log "INFO" "Starting mysql server with 'docker-entrypoint.sh mysqld $args'..."
+    log "INFO" "Starting MySQL server with dockker-intrypoint.sh mysqld $args..."
 
     if [[ $MARIADB_VERSION == "1:11"* ]]; then
-        docker-entrypoint.sh mariadbd $@
+        docker-entrypoint.sh mariadbd $args &
     else
-        docker-entrypoint.sh mysqld $@
+        docker-entrypoint.sh mysqld $args &
     fi
-#    docker-entrypoint.sh mysqld $args &
+
     pid=$!
-    log "INFO" "The process id of mysqld is '$pid'"
+    log "INFO" "The process ID of mysqld is '$pid'"
 }
+
 
 
 

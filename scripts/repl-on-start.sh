@@ -24,25 +24,34 @@ log "INFO" "found peer-list file"
 hosts=$(cat "/scripts/peer-list")
 
 log "INFO" "hosts are {$hosts}"
+svr_id=$(($(echo -n "${HOSTNAME}" | sed -e "s/${BASE_NAME}-//g") + 1))
+
+echo "Generated server_id -> $svr_id"
+echo "Hostname: ${HOSTNAME}"
+echo "Base Name: ${BASE_NAME}"
 
 # write on galera configuration file
 if [[ $MARIADB_VERSION == "1:11"* ]]; then
     cat >>/etc/mysql/conf.d/my.cnf <<EOL
 [mariadbd]
 log-bin
-server_id=1
-log-basename=mariadb
-binlog-format=mixed
+log_bin=mariadb-bin
+log_slave_updates=1
+server_id=$svr_id
 bind-address=0.0.0.0
+gtid_strict_mode=ON
+binlog-format=mixed
 EOL
 else
     cat >>/etc/mysql/conf.d/my.cnf <<EOL
 [mysqld]
 log-bin
-server_id=1
-log-basename=mariadb
-binlog-format=mixed
+log_bin=mariadb-bin
+log_slave_updates=1
+server_id=$svr_id
 bind-address=0.0.0.0
+gtid_strict_mode=ON
+binlog-format=mixed
 EOL
 fi
 
