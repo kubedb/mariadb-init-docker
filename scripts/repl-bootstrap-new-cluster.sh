@@ -14,6 +14,26 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
+function retry {
+    local retries="$1"
+    shift
+
+    local count=0
+    local wait=1
+    until "$@"; do
+        exit="$?"
+        if [ $count -lt $retries ]; then
+            log "INFO" "Attempt $count/$retries. Command exited with exit_code: $exit. Retrying after $wait seconds..."
+            sleep $wait
+        else
+            log "INFO" "Command failed in all $retries attempts with exit_code: $exit. Stopping trying any further...."
+            return $exit
+        fi
+        count=$(($count + 1))
+    done
+    return 0
+}
+
 # wait for the peer-list file created by coordinator
 while [ ! -f "/scripts/peer-list" ]; do
     log "WARNING" "peer-list is not created yet"
@@ -68,7 +88,7 @@ function create_replication_user() {
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Replication user not found. Creating new replication user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
-        retry 120 ${mysql} -N -e "CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;"
+        retry 120 ${mysql} -N -e "CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
         retry 120 ${mysql} -N -e "FLUSH PRIVILEGES;"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
@@ -90,7 +110,7 @@ function create_maxscale_user() {
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Replication user not found. Creating new maxscale user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
-        retry 120 ${mysql} -N -e "CREATE USER 'maxscale'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;"
+        retry 120 ${mysql} -N -e "CREATE USER 'maxscale'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.user TO 'maxscale'@'%';"
         retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.db TO 'maxscale'@'%';"
         retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.tables_priv TO 'maxscale'@'%';"
@@ -119,7 +139,7 @@ function create_monitor_user() {
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Replication user not found. Creating new monitor user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
-        retry 120 ${mysql} -N -e "CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;"
+        retry 120 ${mysql} -N -e "CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
         retry 120 ${mysql} -N -e "GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
         retry 120 ${mysql} -N -e "FLUSH PRIVILEGES;"
@@ -138,14 +158,34 @@ function bootstrap_cluster() {
     # - start group replication
     # - set global variable group_replication_bootstrap_group to `OFF`
     #   ref:  https://dev.mysql.com/doc/refman/8.0/en/group-replication-bootstrap.html
+    echo "this is primaey node"
+}
+
+
+function join_into_cluster() {
+
+      # wait for the script copied by coordinator
+      while [ ! -f "/scripts/primary.txt" ]; do
+          log "WARNING" "primary detector file isn't present yet!"
+          sleep 1
+      done
+      primary=$(cat /scripts/primary.txt)
+      rm -rf /scripts/signal.txt
+    # member try to join into the existing group
+    log "INFO" "The replica, ${report_host} is joining into the existing group..."
     local mysql="$mysql_header --host=$localhost"
-    log "INFO" "bootstrapping cluster with host $report_host..."
+
+    # for 1st time joining, there need to run `RESET MASTER` to set the binlog and gtid's initial position.
+    # then run clone process to copy data directly from valid donor. That's why pod will be restart for 1st time joining into the group replication.
+    # https://dev.mysql.com/doc/refman/8.0/en/clone-plugin-remote.html
+    export mysqld_alive=1
     if [[ "$joining_for_first_time" == "1" ]]; then
-        retry 120 ${mysql} -N -e "RESET MASTER;"
+        log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
+        retry 20 ${mysql} -N -e "set global gtid_slave_pos='';"
+        retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$primary',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',"MASTER_USE_GTID = current_pos;
+        retry 20 ${mysql} -N -e "START SLAVE;"
     fi
-    retry 120 ${mysql} -N -e "SET GLOBAL group_replication_bootstrap_group=ON;"
-    retry 120 ${mysql} -N -e "START GROUP_REPLICATION;"
-    retry 120 ${mysql} -N -e "SET GLOBAL group_replication_bootstrap_group=OFF;"
+    echo "end join in cluster"
 }
 
 
@@ -164,7 +204,7 @@ function start_mysqld_in_background() {
 }
 start_mysqld_in_background
 
-export mysql_header="mysql -u ${USER} --port=3306"
+export mysql_header="mariadb -u ${USER} --port=3306"
 export MYSQL_PWD=${PASSWORD}
 export member_hosts=($(echo -n ${peers[*]} | tr -d '[]'))
 export joining_for_first_time=0
@@ -205,9 +245,9 @@ while true; do
     fi
 
     if [[ $desired_func == "join_in_cluster" ]]; then
-        check_member_list_updated "${member_hosts[*]}"
-        wait_for_primary "${member_hosts[*]}"
-        set_valid_donors
+#        check_member_list_updated "${member_hosts[*]}"
+#        wait_for_primary "${member_hosts[*]}"
+#        set_valid_donors
         join_into_cluster
     fi
     if [[ $desired_func == "join_by_clone" ]]; then
