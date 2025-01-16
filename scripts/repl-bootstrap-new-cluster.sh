@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-
+env | sort | grep "POD\|HOST\|NAME"
+args=$@
+NAMESPACE="$POD_NAMESPACE"
+USER="$MYSQL_ROOT_USERNAME"
+PASSWORD="$MYSQL_ROOT_PASSWORD"
 function timestamp() {
     date +"%Y/%m/%d %T"
 }
@@ -10,15 +14,28 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
+# wait for the peer-list file created by coordinator
+while [ ! -f "/scripts/peer-list" ]; do
+    log "WARNING" "peer-list is not created yet"
+    sleep 1
+done
+hosts=$(cat "/scripts/peer-list")
+IFS=', ' read -r -a peers <<<"$hosts"
+echo "${peers[@]}"
+log "INFO" "hosts are ${peers[@]}"
 
 echo "\n\n\nthis file is running\n\n\n\n"
 
-args=$@
+report_host="$HOSTNAME.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc"
+echo "report_host = $report_host "
+# create mysql client with user exported in mysql_header and export password
+# this is to bypass the warning message for using password
+localhost="127.0.0.1"
 
 # wait for mysql daemon be running (alive)
 function wait_for_mysqld_running() {
     local mysql="$mysql_header --host=$localhost"
-
+    echo "value of command->>>>>>>>>>>>.. $mysql"
     for i in {900..0}; do
         out=$(${mysql} -N -e "select 1;" 2>/dev/null)
         log "INFO" "Attempt $i: Pinging '$report_host' has returned: '$out'...................................."
@@ -112,6 +129,26 @@ function create_monitor_user() {
     fi
     touch /scripts/ready.txt
 }
+
+function bootstrap_cluster() {
+    # for bootstrap group replication, the following steps have been taken:
+    # - initially reset the member to cleanup all data configuration/set the binlog and gtid's initial position.
+    #   ref: https://dev.mysql.com/doc/refman/8.0/en/reset-master.html
+    # - set global variable group_replication_bootstrap_group to `ON`
+    # - start group replication
+    # - set global variable group_replication_bootstrap_group to `OFF`
+    #   ref:  https://dev.mysql.com/doc/refman/8.0/en/group-replication-bootstrap.html
+    local mysql="$mysql_header --host=$localhost"
+    log "INFO" "bootstrapping cluster with host $report_host..."
+    if [[ "$joining_for_first_time" == "1" ]]; then
+        retry 120 ${mysql} -N -e "RESET MASTER;"
+    fi
+    retry 120 ${mysql} -N -e "SET GLOBAL group_replication_bootstrap_group=ON;"
+    retry 120 ${mysql} -N -e "START GROUP_REPLICATION;"
+    retry 120 ${mysql} -N -e "SET GLOBAL group_replication_bootstrap_group=OFF;"
+}
+
+
 export pid
 function start_mysqld_in_background() {
     log "INFO" "Starting MySQL server with dockker-intrypoint.sh mysqld $args..."
@@ -125,9 +162,24 @@ function start_mysqld_in_background() {
     pid=$!
     log "INFO" "The process ID of mysqld is '$pid'"
 }
+start_mysqld_in_background
 
+export mysql_header="mysql -u ${USER} --port=3306"
+export MYSQL_PWD=${PASSWORD}
+export member_hosts=($(echo -n ${peers[*]} | tr -d '[]'))
+export joining_for_first_time=0
 
+# wait for mysqld to be ready
+wait_for_mysqld_running
 
+# ensure replication user
+create_replication_user
+
+# ensure maxscale user
+create_maxscale_user
+
+# ensure monitor user
+create_monitor_user
 
 while true; do
     kill -0 $pid
@@ -168,9 +220,3 @@ while true; do
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid
 done
-
-if [[ $MARIADB_VERSION == "1:11"* ]]; then
-    docker-entrypoint.sh mariadbd $@
-else
-    docker-entrypoint.sh mysqld $@
-fi
