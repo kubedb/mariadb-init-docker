@@ -86,6 +86,7 @@ function create_replication_user() {
     out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='repl';" | awk '{print$1}')
     # if the user doesn't exist, crete new one.
     if [[ "$out" -eq "0" ]]; then
+        joining_for_first_time=1
         log "INFO" "Replication user not found. Creating new replication user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
         retry 120 ${mysql} -N -e "CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
@@ -158,19 +159,28 @@ function bootstrap_cluster() {
     # - start group replication
     # - set global variable group_replication_bootstrap_group to `OFF`
     #   ref:  https://dev.mysql.com/doc/refman/8.0/en/group-replication-bootstrap.html
-    echo "this is primaey node"
+    echo "this is primary node"
+    # ensure maxscale user
+    create_maxscale_user
+
+    # ensure monitor user
+    create_monitor_user
 }
 
 
 function join_into_cluster() {
-
       # wait for the script copied by coordinator
       while [ ! -f "/scripts/primary.txt" ]; do
           log "WARNING" "primary detector file isn't present yet!"
           sleep 1
       done
+#      while [ ! -f "/scripts/tut.txt" ]; do
+#                log "WARNING" "tut file isn't present yet!"
+#                sleep 1
+#      done
       primary=$(cat /scripts/primary.txt)
-      rm -rf /scripts/signal.txt
+      echo "primary is $primary"
+      rm -rf /scripts/primary.txt
     # member try to join into the existing group
     log "INFO" "The replica, ${report_host} is joining into the existing group..."
     local mysql="$mysql_header --host=$localhost"
@@ -179,13 +189,22 @@ function join_into_cluster() {
     # then run clone process to copy data directly from valid donor. That's why pod will be restart for 1st time joining into the group replication.
     # https://dev.mysql.com/doc/refman/8.0/en/clone-plugin-remote.html
     export mysqld_alive=1
-    if [[ "$joining_for_first_time" == "1" ]]; then
-        log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
-        retry 20 ${mysql} -N -e "set global gtid_slave_pos='';"
-        retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$primary',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',"MASTER_USE_GTID = current_pos;
-        retry 20 ${mysql} -N -e "START SLAVE;"
-    fi
+#    if [[ "$joining_for_first_time" == "1" ]]; then
+#        log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
+#        retry 20 ${mysql} -N -e "set global gtid_slave_pos='';"
+#        retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$primary',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
+#        retry 20 ${mysql} -N -e "START SLAVE;"
+#    fi
     echo "end join in cluster"
+#    while [ ! -f "/scripts/tut.txt" ]; do
+#              log "WARNING" "primary detector file isn't present yet!"
+#              sleep 1
+#          done
+    # ensure maxscale user
+    create_maxscale_user
+
+    # ensure monitor user
+    create_monitor_user
 }
 
 
@@ -215,11 +234,6 @@ wait_for_mysqld_running
 # ensure replication user
 create_replication_user
 
-# ensure maxscale user
-create_maxscale_user
-
-# ensure monitor user
-create_monitor_user
 
 while true; do
     kill -0 $pid
