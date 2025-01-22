@@ -91,7 +91,6 @@ function create_replication_user() {
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
         retry 120 ${mysql} -N -e "CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
-        retry 120 ${mysql} -N -e "FLUSH PRIVILEGES;"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
     else
         log "INFO" "Replication user exists. Skipping creating new one......."
@@ -120,7 +119,6 @@ function create_maxscale_user() {
         retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.proxies_priv TO 'maxscale'@'%';"
         retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.roles_mapping TO 'maxscale'@'%';"
         retry 120 ${mysql} -N -e "GRANT SHOW DATABASES ON *.* TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "FLUSH PRIVILEGES;"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
     else
         log "INFO" "Maxscale user exists. Skipping creating new one......."
@@ -143,7 +141,6 @@ function create_monitor_user() {
         retry 120 ${mysql} -N -e "CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
         retry 120 ${mysql} -N -e "GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
-        retry 120 ${mysql} -N -e "FLUSH PRIVILEGES;"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
     else
         log "INFO" "Monitor user exists. Skipping creating new one......."
@@ -160,6 +157,10 @@ function bootstrap_cluster() {
     # - set global variable group_replication_bootstrap_group to `OFF`
     #   ref:  https://dev.mysql.com/doc/refman/8.0/en/group-replication-bootstrap.html
     echo "this is primary node"
+
+    # ensure replication user
+    create_replication_user
+
     # ensure maxscale user
     create_maxscale_user
 
@@ -189,22 +190,26 @@ function join_into_cluster() {
     # then run clone process to copy data directly from valid donor. That's why pod will be restart for 1st time joining into the group replication.
     # https://dev.mysql.com/doc/refman/8.0/en/clone-plugin-remote.html
     export mysqld_alive=1
-#    if [[ "$joining_for_first_time" == "1" ]]; then
-#        log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
-#        retry 20 ${mysql} -N -e "set global gtid_slave_pos='';"
-#        retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$primary',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
-#        retry 20 ${mysql} -N -e "START SLAVE;"
-#    fi
+    if [[ "$joining_for_first_time" == "1" ]]; then
+        log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
+        retry 20 ${mysql} -N -e "STOP SLAVE;"
+        retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
+        retry 20 ${mysql} -N -e "set global gtid_slave_pos='';"
+        retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$primary',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
+        retry 20 ${mysql} -N -e "START SLAVE;"
+    fi
     echo "end join in cluster"
 #    while [ ! -f "/scripts/tut.txt" ]; do
 #              log "WARNING" "primary detector file isn't present yet!"
 #              sleep 1
 #          done
+# ensure replication user
+#    create_replication_user
     # ensure maxscale user
-    create_maxscale_user
+#    create_maxscale_user
 
     # ensure monitor user
-    create_monitor_user
+#    create_monitor_user
 }
 
 
@@ -231,8 +236,7 @@ export joining_for_first_time=0
 # wait for mysqld to be ready
 wait_for_mysqld_running
 
-# ensure replication user
-create_replication_user
+
 
 
 while true; do
@@ -262,13 +266,8 @@ while true; do
 #        check_member_list_updated "${member_hosts[*]}"
 #        wait_for_primary "${member_hosts[*]}"
 #        set_valid_donors
+        joining_for_first_time=1
         join_into_cluster
-    fi
-    if [[ $desired_func == "join_by_clone" ]]; then
-        check_member_list_updated "${member_hosts[*]}"
-        wait_for_primary "${member_hosts[*]}"
-        set_valid_donors
-        join_by_clone
     fi
     joining_for_first_time=0
     log "INFO" "waiting for mysql process id  = $pid"
