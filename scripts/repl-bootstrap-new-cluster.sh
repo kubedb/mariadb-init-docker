@@ -44,8 +44,6 @@ IFS=', ' read -r -a peers <<<"$hosts"
 echo "${peers[@]}"
 log "INFO" "hosts are ${peers[@]}"
 
-echo "\n\n\nthis file is running\n\n\n\n"
-
 report_host="$HOSTNAME.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc"
 echo "report_host = $report_host "
 # create mysql client with user exported in mysql_header and export password
@@ -55,14 +53,12 @@ localhost="127.0.0.1"
 # wait for mysql daemon be running (alive)
 function wait_for_mysqld_running() {
     local mysql="$mysql_header --host=$localhost"
-    echo "value of command->>>>>>>>>>>>.. $mysql"
     for i in {900..0}; do
         out=$(${mysql} -N -e "select 1;" 2>/dev/null)
         log "INFO" "Attempt $i: Pinging '$report_host' has returned: '$out'...................................."
         if [[ "$out" == "1" ]]; then
             break
         fi
-
         echo -n .
         sleep 1
     done
@@ -108,7 +104,7 @@ function create_maxscale_user() {
     out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale';" | awk '{print$1}')
     # if the user doesn't exist, crete new one.
     if [[ "$out" -eq "0" ]]; then
-        log "INFO" "Replication user not found. Creating new maxscale user........"
+        log "INFO" "Maxscale user not found. Creating new maxscale user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
         retry 120 ${mysql} -N -e "CREATE USER 'maxscale'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.user TO 'maxscale'@'%';"
@@ -136,7 +132,7 @@ function create_monitor_user() {
     out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='monitor_user';" | awk '{print$1}')
     # if the user doesn't exist, crete new one.
     if [[ "$out" -eq "0" ]]; then
-        log "INFO" "Replication user not found. Creating new monitor user........"
+        log "INFO" "Monitor user not found. Creating new monitor user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
         retry 120 ${mysql} -N -e "CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
@@ -147,17 +143,9 @@ function create_monitor_user() {
     fi
     touch /scripts/ready.txt
 }
-
 function bootstrap_cluster() {
-    # for bootstrap group replication, the following steps have been taken:
-    # - initially reset the member to cleanup all data configuration/set the binlog and gtid's initial position.
-    #   ref: https://dev.mysql.com/doc/refman/8.0/en/reset-master.html
-    # - set global variable group_replication_bootstrap_group to `ON`
-    # - start group replication
-    # - set global variable group_replication_bootstrap_group to `OFF`
-    #   ref:  https://dev.mysql.com/doc/refman/8.0/en/group-replication-bootstrap.html
-    echo "this is primary node"
 
+    echo "this is primary node"
     # ensure replication user
     create_replication_user
 
@@ -168,27 +156,10 @@ function bootstrap_cluster() {
     create_monitor_user
 }
 
-
 function join_into_cluster() {
-      # wait for the script copied by coordinator
-      while [ ! -f "/scripts/primary.txt" ]; do
-          log "WARNING" "primary detector file isn't present yet!"
-          sleep 1
-      done
-#      while [ ! -f "/scripts/tut.txt" ]; do
-#                log "WARNING" "tut file isn't present yet!"
-#                sleep 1
-#      done
-      primary=$(cat /scripts/primary.txt)
-      echo "primary is $primary"
-      rm -rf /scripts/primary.txt
     # member try to join into the existing group
     log "INFO" "The replica, ${report_host} is joining into the existing group..."
     local mysql="$mysql_header --host=$localhost"
-
-    # for 1st time joining, there need to run `RESET MASTER` to set the binlog and gtid's initial position.
-    # then run clone process to copy data directly from valid donor. That's why pod will be restart for 1st time joining into the group replication.
-    # https://dev.mysql.com/doc/refman/8.0/en/clone-plugin-remote.html
     export mysqld_alive=1
     if [[ "$joining_for_first_time" == "1" ]]; then
         log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
@@ -199,17 +170,6 @@ function join_into_cluster() {
         retry 20 ${mysql} -N -e "START SLAVE;"
     fi
     echo "end join in cluster"
-#    while [ ! -f "/scripts/tut.txt" ]; do
-#              log "WARNING" "primary detector file isn't present yet!"
-#              sleep 1
-#          done
-# ensure replication user
-#    create_replication_user
-    # ensure maxscale user
-#    create_maxscale_user
-
-    # ensure monitor user
-#    create_monitor_user
 }
 
 
@@ -236,9 +196,6 @@ export joining_for_first_time=0
 # wait for mysqld to be ready
 wait_for_mysqld_running
 
-
-
-
 while true; do
     kill -0 $pid
     exit="$?"
@@ -263,9 +220,15 @@ while true; do
     fi
 
     if [[ $desired_func == "join_in_cluster" ]]; then
-#        check_member_list_updated "${member_hosts[*]}"
-#        wait_for_primary "${member_hosts[*]}"
-#        set_valid_donors
+        # wait for the script copied by coordinator
+        while [ ! -f "/scripts/primary.txt" ]; do
+            log "WARNING" "primary detector file isn't present yet!"
+            sleep 1
+        done
+        primary=$(cat /scripts/primary.txt)
+        echo "primary is $primary"
+        rm -rf /scripts/primary.txt
+
         joining_for_first_time=1
         join_into_cluster
     fi
