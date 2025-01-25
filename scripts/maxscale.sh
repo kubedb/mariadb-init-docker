@@ -1,26 +1,23 @@
 #!/bin/sh
 
-echo "INFO" "Storing default mysqld config into /etc/mysql/my.cnf"
+args="$@"
+echo "INFO" "Storing default mysqld config into /etc/maxscale/maxscale.cnf"
 
-#mkdir -p /etc/maxscale.cnf.d/conf.d/
-#echo "[maxscale] /etc/maxscale.cnf.d/conf.d/" >>/etc/maxscale.cnf.d/maxscale.cnf
-#echo "!includedir /etc/maxscale.cnf.d/conf.d/" >>/etc/maxscale.cnf.d/maxscale.cnf
-#mkdir -p /etc/maxscale.cnf.d/custom-conf.d/
-#echo "!includedir /etc/maxscale.cnf.d/custom-conf.d/" >>/etc/maxscale.cnf.d/maxscale.cnf
-
-# Assuming HOST_LIST is set as a comma-separated list like "ha-mariadb-0,ha-mariadb-1,ha-mariadb-2"
-#IFS=',' read -r -a hosts <<< "$HOST_LIST"
-IFS=','
-set -- $HOST_LIST
-
+mkdir -p /etc/maxscale/maxscale.cnf.d
 #not working, says duplicate, as main file contains maxscale section
-#cat >>/etc/maxscale.cnf.d/maxscale.cnf <<EOL
-#[maxscale]
-#threads=auto
-#log_debug=1
-#EOL
+cat >>/etc/maxscale/maxscale.cnf <<EOL
+[maxscale]
+admin_secure_gui=false
+threads=1
+log_debug=1
+# this enables external access to the REST API outside of localhost
+# please review / modify for any public / non development environments
+admin_host=0.0.0.0
 
-cat >>/etc/maxscale.cnf.d/monitor.cnf <<EOL
+EOL
+
+cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+
 [ReplicationMonitor]
 type=monitor
 module=mariadbmon
@@ -36,7 +33,8 @@ replication_password='$MYSQL_ROOT_PASSWORD'
 EOL
 
 
-cat >>/etc/maxscale.cnf.d/router.cnf <<EOL
+cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+
 [RW-Split-Router]
 type=service
 router=readwritesplit
@@ -50,7 +48,8 @@ slave_selection_criteria=ADAPTIVE_ROUTING
 master_accept_reads=true
 EOL
 
-cat >>/etc/maxscale.cnf.d/listener.cnf <<EOL
+cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+
 [RW-Split-Listener]
 type=listener
 service=RW-Split-Router
@@ -58,14 +57,16 @@ protocol=MariaDBClient
 port=3306
 EOL
 
-# Append the server configurations to /etc/maxscale/conf.d/servers.cnf
-cat >> /etc/maxscale.cnf.d/servers.cnf <<EOL
+cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 # Auto-generated server list from environment
 EOL
 
 i=1
-for host in "$@"; do
-  cat >> /etc/maxscale.cnf.d/servers.cnf <<EOL
+# Split HOST_LIST into an array
+IFS=',' read -r -a host_array <<< "$HOST_LIST"
+for host in "${host_array[@]}"; do
+  cat >> /etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+
 [server$i]
 type=server
 address=$host.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster.local
@@ -76,3 +77,16 @@ EOL
 done
 
 echo "INFO: MaxScale configuration files have been successfully created."
+IFS=' '
+set -- $args
+docker-entrypoint.sh maxscale "$@"
+
+
+
+
+
+
+
+
+
+
