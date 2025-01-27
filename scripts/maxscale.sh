@@ -7,14 +7,20 @@ mkdir -p /etc/maxscale/maxscale.cnf.d
 #not working, says duplicate, as main file contains maxscale section
 cat >>/etc/maxscale/maxscale.cnf <<EOL
 [maxscale]
-admin_secure_gui=false
 threads=1
 log_debug=1
+EOL
+
+if [[ "${UI:-}" == "true" ]]; then
+  cat >>/etc/maxscale/maxscale.cnf <<EOL
+admin_secure_gui=false
 # this enables external access to the REST API outside of localhost
 # please review / modify for any public / non development environments
 admin_host=0.0.0.0
-
 EOL
+else
+  echo "UI is not set to true or does not exist."
+fi
 
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 
