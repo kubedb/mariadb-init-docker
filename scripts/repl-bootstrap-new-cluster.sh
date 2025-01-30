@@ -172,6 +172,19 @@ function join_into_cluster() {
     echo "end join in cluster"
 }
 
+function join_by_gtid() {
+    # member try to join into the existing group
+    log "INFO" "The replica, ${report_host} is joining into the existing group by primary replica's gtid..."
+    local mysql="$mysql_header --host=$localhost"
+    log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
+    retry 20 ${mysql} -N -e "STOP SLAVE;"
+    retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
+    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+    retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$primary',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
+    retry 10 ${mysql} -N -e "START SLAVE;"
+    echo "end join with gtid in cluster"
+}
+
 
 export pid
 function start_mysqld_in_background() {
@@ -231,6 +244,25 @@ while true; do
 
         joining_for_first_time=1
         join_into_cluster
+    fi
+
+    if [[ $desired_func == "join_by_gtid" ]]; then
+        # wait for the script copied by coordinator
+        while [ ! -f "/scripts/primary.txt" ]; do
+            log "WARNING" "primary detector file isn't present yet!"
+            sleep 1
+        done
+        primary=$(cat /scripts/primary.txt)
+
+        while [ ! -f "/scripts/gtid.txt" ]; do
+            log "WARNING" "gtid detector file isn't present yet!"
+            sleep 1
+        done
+        gtid=$(cat /scripts/gtid.txt)
+
+        echo "primary replica's current gtid position is $gtid"
+        rm -rf /scripts/gtid.txt
+        join_by_gtid
     fi
     joining_for_first_time=0
     log "INFO" "waiting for mysql process id  = $pid"
