@@ -11,6 +11,29 @@ threads=1
 log_debug=1
 EOL
 
+cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+# Auto-generated server list from environment
+EOL
+
+serverList=""
+i=1
+# Split HOST_LIST into an array
+IFS=',' read -r -a host_array <<< "$HOST_LIST"
+for host in "${host_array[@]}"; do
+  cat >> /etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+[server$i]
+type=server
+address=$host.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster.local
+port=3306
+protocol=MariaDBBackend
+EOL
+  if [[ -n "$serverList" ]]; then
+      serverList+=","
+  fi
+  serverList+="server$i"
+  i=$((i + 1))
+done
+
 if [[ "${UI:-}" == "true" ]]; then
   cat >>/etc/maxscale/maxscale.cnf <<EOL
 admin_secure_gui=false
@@ -27,7 +50,7 @@ cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 [ReplicationMonitor]
 type=monitor
 module=mariadbmon
-servers=server1,server2,server3
+servers=$serverList
 user=monitor_user
 password='$MYSQL_ROOT_PASSWORD'
 auto_failover=ON
@@ -44,7 +67,7 @@ cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 [RW-Split-Router]
 type=service
 router=readwritesplit
-servers=server1,server2,server3
+servers=$serverList
 user=maxscale
 password='$MYSQL_ROOT_PASSWORD'
 master_reconnection=true
@@ -63,24 +86,6 @@ protocol=MariaDBClient
 port=3306
 EOL
 
-cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
-# Auto-generated server list from environment
-EOL
-
-i=1
-# Split HOST_LIST into an array
-IFS=',' read -r -a host_array <<< "$HOST_LIST"
-for host in "${host_array[@]}"; do
-  cat >> /etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
-
-[server$i]
-type=server
-address=$host.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster.local
-port=3306
-protocol=MariaDBBackend
-EOL
-  i=$((i + 1))
-done
 
 echo "INFO: MaxScale configuration files have been successfully created."
 IFS=' '
