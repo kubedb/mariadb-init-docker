@@ -16,14 +16,12 @@ cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 EOL
 
 serverList=""
-i=1
 # Split HOST_LIST into an array
-IFS=',' read -r -a host_array <<< "$HOST_LIST"
-for host in "${host_array[@]}"; do
+for ((i=1; i<=REPLICAS; i++)); do
   cat >> /etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 [server$i]
 type=server
-address=$host.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster.local
+address=$BASE_NAME-$((i - 1)).$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster.local
 port=3306
 protocol=MariaDBBackend
 EOL
@@ -31,7 +29,6 @@ EOL
       serverList+=","
   fi
   serverList+="server$i"
-  i=$((i + 1))
 done
 
 if [[ "${UI:-}" == "true" ]]; then
@@ -85,7 +82,6 @@ service=RW-Split-Router
 protocol=MariaDBClient
 port=3306
 EOL
-
 
 echo "INFO: MaxScale configuration files have been successfully created."
 IFS=' '
