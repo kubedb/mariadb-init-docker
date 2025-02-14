@@ -4,7 +4,6 @@ args="$@"
 echo "INFO" "Storing default mysqld config into /etc/maxscale/maxscale.cnf"
 
 mkdir -p /etc/maxscale/maxscale.cnf.d
-#not working, says duplicate, as main file contains maxscale section
 cat >>/etc/maxscale/maxscale.cnf <<EOL
 [maxscale]
 threads=1
@@ -35,7 +34,7 @@ if [[ "${UI:-}" == "true" ]]; then
   cat >>/etc/maxscale/maxscale.cnf <<EOL
 admin_secure_gui=false
 # this enables external access to the REST API outside of localhost
-# please review / modify for any public / non development environments
+# review / modify for any public / non development environments
 admin_host=0.0.0.0
 EOL
 else

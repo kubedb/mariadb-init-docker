@@ -46,8 +46,6 @@ log "INFO" "hosts are ${peers[@]}"
 
 report_host="$HOSTNAME.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc"
 echo "report_host = $report_host "
-# create mysql client with user exported in mysql_header and export password
-# this is to bypass the warning message for using password
 localhost="127.0.0.1"
 
 # wait for mysql daemon be running (alive)
@@ -72,11 +70,9 @@ function wait_for_mysqld_running() {
 }
 
 function create_replication_user() {
-    # now we need to configure a replication user for each server.
     # https://mariadb.com/kb/en/setting-up-replication/
     log "INFO" "Checking whether replication user exist or not......"
     local mysql="$mysql_header --host=$localhost"
-
     # At first, ensure that the command executes without any error. Then, run the command again and extract the output.
     retry 120 ${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='repl';" | awk '{print$1}'
     out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='repl';" | awk '{print$1}')
@@ -94,11 +90,8 @@ function create_replication_user() {
 }
 
 function create_maxscale_user() {
-    # now we need to configure a replication user for each server.
-    # https://mariadb.com/kb/en/setting-up-replication/
     log "INFO" "Checking whether maxscale user exist or not......"
     local mysql="$mysql_header --host=$localhost"
-
     # At first, ensure that the command executes without any error. Then, run the command again and extract the output.
     retry 120 ${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale';" | awk '{print$1}'
     out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale';" | awk '{print$1}')
@@ -122,8 +115,6 @@ function create_maxscale_user() {
 }
 
 function create_monitor_user() {
-    # now we need to configure a replication user for each server.
-    # https://mariadb.com/kb/en/setting-up-replication/
     log "INFO" "Checking whether monitor user exist or not......"
     local mysql="$mysql_header --host=$localhost"
 
@@ -157,7 +148,7 @@ function bootstrap_cluster() {
 }
 
 function join_into_cluster() {
-    # member try to join into the existing group
+    # member try to join into the existing group as a fresh instance
     log "INFO" "The replica, ${report_host} is joining into the existing group..."
     local mysql="$mysql_header --host=$localhost"
     export mysqld_alive=1
@@ -173,7 +164,7 @@ function join_into_cluster() {
 }
 
 function join_by_gtid() {
-    # member try to join into the existing group
+    # member try to join into the existing group as old instance
     log "INFO" "The replica, ${report_host} is joining into the existing group by primary replica's gtid..."
     local mysql="$mysql_header --host=$localhost"
     log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
@@ -188,7 +179,7 @@ function join_by_gtid() {
 
 export pid
 function start_mysqld_in_background() {
-    log "INFO" "Starting MySQL server with dockker-intrypoint.sh mysqld $args..."
+    log "INFO" "Starting MySQL server with docker-entrypoint.sh mysqld $args..."
 
     if [[ $MARIADB_VERSION == "1:11"* ]]; then
         docker-entrypoint.sh mariadbd $args &
@@ -234,13 +225,13 @@ while true; do
 
     if [[ $desired_func == "join_in_cluster" ]]; then
         # wait for the script copied by coordinator
-        while [ ! -f "/scripts/primary.txt" ]; do
-            log "WARNING" "primary detector file isn't present yet!"
+        while [ ! -f "/scripts/master.txt" ]; do
+            log "WARNING" "master detector file isn't present yet!"
             sleep 1
         done
-        primary=$(cat /scripts/primary.txt)
-        echo "primary is $primary"
-        rm -rf /scripts/primary.txt
+        master=$(cat /scripts/master.txt)
+        echo "master is $master"
+        rm -rf /scripts/master.txt
 
         joining_for_first_time=1
         join_into_cluster
@@ -248,11 +239,11 @@ while true; do
 
     if [[ $desired_func == "join_by_gtid" ]]; then
         # wait for the script copied by coordinator
-        while [ ! -f "/scripts/primary.txt" ]; do
-            log "WARNING" "primary detector file isn't present yet!"
+        while [ ! -f "/scripts/master.txt" ]; do
+            log "WARNING" "master detector file isn't present yet!"
             sleep 1
         done
-        primary=$(cat /scripts/primary.txt)
+        master=$(cat /scripts/master.txt)
 
         while [ ! -f "/scripts/gtid.txt" ]; do
             log "WARNING" "gtid detector file isn't present yet!"
@@ -260,7 +251,7 @@ while true; do
         done
         gtid=$(cat /scripts/gtid.txt)
 
-        echo "primary replica's current gtid position is $gtid"
+        echo "master replica's current gtid position is $gtid"
         rm -rf /scripts/gtid.txt
         join_by_gtid
     fi
@@ -268,3 +259,17 @@ while true; do
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid
 done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
