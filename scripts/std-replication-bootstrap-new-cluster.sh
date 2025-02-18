@@ -136,7 +136,7 @@ function create_monitor_user() {
 }
 function bootstrap_cluster() {
 
-    echo "this is primary node"
+    echo "this is master node"
     # ensure replication user
     create_replication_user
 
@@ -151,27 +151,25 @@ function join_into_cluster() {
     # member try to join into the existing group as a fresh instance
     log "INFO" "The replica, ${report_host} is joining into the existing group..."
     local mysql="$mysql_header --host=$localhost"
-    export mysqld_alive=1
-    if [[ "$joining_for_first_time" == "1" ]]; then
-        log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
-        retry 20 ${mysql} -N -e "STOP SLAVE;"
-        retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-        retry 20 ${mysql} -N -e "set global gtid_slave_pos='';"
-        retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$primary',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
-        retry 20 ${mysql} -N -e "START SLAVE;"
-    fi
+    log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining first time.."
+    retry 20 ${mysql} -N -e "STOP SLAVE;"
+    retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
+    retry 20 ${mysql} -N -e "set global gtid_slave_pos='';"
+    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
+    retry 20 ${mysql} -N -e "START SLAVE;"
+
     echo "end join in cluster"
 }
 
 function join_by_gtid() {
     # member try to join into the existing group as old instance
-    log "INFO" "The replica, ${report_host} is joining into the existing group by primary replica's gtid..."
+    log "INFO" "The replica, ${report_host} is joining into the existing group by master replica's gtid..."
     local mysql="$mysql_header --host=$localhost"
     log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
     retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
-    retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$primary',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
+    retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
     echo "end join with gtid in cluster"
 }
@@ -232,8 +230,6 @@ while true; do
         master=$(cat /scripts/master.txt)
         echo "master is $master"
         rm -rf /scripts/master.txt
-
-        joining_for_first_time=1
         join_into_cluster
     fi
 
@@ -255,7 +251,6 @@ while true; do
         rm -rf /scripts/gtid.txt
         join_by_gtid
     fi
-    joining_for_first_time=0
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid
 done
