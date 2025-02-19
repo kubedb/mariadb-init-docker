@@ -31,6 +31,6 @@ while [ true ]; do
     fi
 
     # start on-start script
-    ./scripts/repl-on-start.sh $@
+    ./scripts/std-replication-on-start.sh $@
     sleep 1
 done
