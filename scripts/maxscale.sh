@@ -87,12 +87,3 @@ IFS=' '
 set -- $args
 docker-entrypoint.sh maxscale "$@"
 
-
-
-
-
-
-
-
-
-

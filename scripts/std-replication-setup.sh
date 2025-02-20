@@ -132,7 +132,6 @@ function create_monitor_user() {
     else
         log "INFO" "Monitor user exists. Skipping creating new one......."
     fi
-    touch /scripts/ready.txt
 }
 function bootstrap_cluster() {
 
@@ -149,7 +148,7 @@ function bootstrap_cluster() {
 
 function join_into_cluster() {
     # member try to join into the existing group as a fresh instance
-    log "INFO" "The replica, ${report_host} is joining into the existing group..."
+    log "INFO" "The replica, ${report_host} is joining to master node...${master}"
     local mysql="$mysql_header --host=$localhost"
     log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining first time.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
@@ -158,20 +157,20 @@ function join_into_cluster() {
     retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
     retry 20 ${mysql} -N -e "START SLAVE;"
 
-    echo "end join in cluster"
+    echo "end join to master node"
 }
 
 function join_by_gtid() {
     # member try to join into the existing group as old instance
-    log "INFO" "The replica, ${report_host} is joining into the existing group by master replica's gtid..."
+    log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
     local mysql="$mysql_header --host=$localhost"
-    log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining for first time.."
+    log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
     retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
-    echo "end join with gtid in cluster"
+    echo "end join to master node by gtid"
 }
 
 
@@ -221,7 +220,7 @@ while true; do
         bootstrap_cluster
     fi
 
-    if [[ $desired_func == "join_in_cluster" ]]; then
+    if [[ $desired_func == "join_to_master" ]]; then
         # wait for the script copied by coordinator
         while [ ! -f "/scripts/master.txt" ]; do
             log "WARNING" "master detector file isn't present yet!"
