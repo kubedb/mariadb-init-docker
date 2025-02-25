@@ -167,7 +167,7 @@ function join_by_gtid() {
     log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+#    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
     echo "end join to master node by gtid"
@@ -187,12 +187,27 @@ function start_mysqld_in_background() {
     pid=$!
     log "INFO" "The process ID of mysqld is '$pid'"
 }
+
+if [ -f "/scripts/clone.txt" ]; then
+  echo "$POD_IP">/scripts/pod_ip_address.txt
+  while true; do
+    socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
+    if [ $? -eq 0 ]; then
+      log "INFO" "Data clone successful"
+      break
+    fi
+  done
+  mariabackup --prepare --target-dir=/var/lib/mysql
+  rm /scripts/clone.txt
+fi
+
+
+
 start_mysqld_in_background
 
 export mysql_header="mariadb -u ${USER} --port=3306"
 export MYSQL_PWD=${PASSWORD}
 export member_hosts=($(echo -n ${peers[*]} | tr -d '[]'))
-export joining_for_first_time=0
 
 # wait for mysqld to be ready
 wait_for_mysqld_running
