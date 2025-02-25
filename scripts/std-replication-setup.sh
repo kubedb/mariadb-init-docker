@@ -146,20 +146,6 @@ function bootstrap_cluster() {
     create_monitor_user
 }
 
-function join_into_cluster() {
-    # member try to join into the existing group as a fresh instance
-    log "INFO" "The replica, ${report_host} is joining to master node...${master}"
-    local mysql="$mysql_header --host=$localhost"
-    log "INFO" "Resetting binlog & gtid to initial state as $report_host is joining first time.."
-    retry 20 ${mysql} -N -e "STOP SLAVE;"
-    retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-    retry 20 ${mysql} -N -e "set global gtid_slave_pos='';"
-    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
-    retry 20 ${mysql} -N -e "START SLAVE;"
-
-    echo "end join to master node"
-}
-
 function join_by_gtid() {
     # member try to join into the existing group as old instance
     log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
@@ -167,7 +153,7 @@ function join_by_gtid() {
     log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-#    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
     echo "end join to master node by gtid"
@@ -189,6 +175,7 @@ function start_mysqld_in_background() {
 }
 
 if [ -f "/scripts/clone.txt" ]; then
+  echo "Waiting for the master to start streaming backup data..."
   echo "$POD_IP">/scripts/pod_ip_address.txt
   while true; do
     socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
@@ -200,8 +187,6 @@ if [ -f "/scripts/clone.txt" ]; then
   mariabackup --prepare --target-dir=/var/lib/mysql
   rm /scripts/clone.txt
 fi
-
-
 
 start_mysqld_in_background
 
@@ -233,18 +218,6 @@ while true; do
     log "INFO" "going to execute $desired_func"
     if [[ $desired_func == "create_cluster" ]]; then
         bootstrap_cluster
-    fi
-
-    if [[ $desired_func == "join_to_master" ]]; then
-        # wait for the script copied by coordinator
-        while [ ! -f "/scripts/master.txt" ]; do
-            log "WARNING" "master detector file isn't present yet!"
-            sleep 1
-        done
-        master=$(cat /scripts/master.txt)
-        echo "master is $master"
-        rm -rf /scripts/master.txt
-        join_into_cluster
     fi
 
     if [[ $desired_func == "join_by_gtid" ]]; then
