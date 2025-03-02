@@ -75,28 +75,8 @@ if [[ $desired_func == "join_by_gtid" ]]; then
         sleep 1
     done
     gtid=$(cat /scripts/gtid.txt)
-
     echo "master replica's current gtid position is $gtid"
     rm -rf /scripts/gtid.txt
     join_by_gtid
 fi
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
-mariadb-admin -u "$MYSQL_ROOT_USERNAME" shutdown
