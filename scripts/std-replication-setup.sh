@@ -146,6 +146,20 @@ function bootstrap_cluster() {
     create_monitor_user
 }
 
+function join_to_cluster() {
+    # member try to join into the existing group as old instance
+    log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
+    local mysql="$mysql_header --host=$localhost"
+    log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
+    retry 20 ${mysql} -N -e "STOP SLAVE;"
+    retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
+#    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+    retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
+    retry 10 ${mysql} -N -e "START SLAVE;"
+    retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
+    echo "end join to master node by gtid"
+}
+
 function join_by_gtid() {
     # member try to join into the existing group as old instance
     log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
@@ -153,9 +167,10 @@ function join_by_gtid() {
     log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+#    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
+    retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
     echo "end join to master node by gtid"
 }
 
@@ -175,6 +190,7 @@ function start_mysqld_in_background() {
 }
 
 if [ -f "/scripts/clone.txt" ]; then
+
   getGTID=$(cat /scripts/gtid.txt)
   IFS='-' read -ra gtidSplit <<< "$getGTID"
   # Check if the length is 3 and matches the condition
@@ -250,7 +266,8 @@ while true; do
         create_maxscale_user
         # ensure monitor user
         create_monitor_user
-        join_by_gtid
+        join_to_cluster
+#        join_by_gtid
     fi
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid

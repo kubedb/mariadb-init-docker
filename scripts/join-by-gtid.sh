@@ -45,9 +45,10 @@ function join_by_gtid() {
     log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+#    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
+    retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
     echo "end join to master node by gtid"
 }
 
