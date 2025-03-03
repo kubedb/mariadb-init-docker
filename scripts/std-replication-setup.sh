@@ -175,16 +175,24 @@ function start_mysqld_in_background() {
 }
 
 if [ -f "/scripts/clone.txt" ]; then
-  echo "Waiting for the master to start streaming backup data..."
-  echo "$POD_IP">/scripts/pod_ip_address.txt
-  while true; do
-    socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
-    if [ $? -eq 0 ]; then
-      log "INFO" "Data clone successful"
-      break
-    fi
-  done
-  mariabackup --prepare --target-dir=/var/lib/mysql
+  getGTID=$(cat /scripts/gtid.txt)
+  IFS='-' read -ra gtidSplit <<< "$getGTID"
+  # Check if the length is 3 and matches the condition
+  if [[ ${#gtidSplit[@]} -eq 3 && ${gtidSplit[1]} == "1" && ${gtidSplit[2]} == "14" ]]; then
+    echo "This is initial setup, no need to clone data through backup/restore"
+  else
+    echo "Waiting for the master to start streaming backup data..."
+    echo "$POD_IP">/scripts/pod_ip_address.txt
+    while true; do
+      socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
+      if [ $? -eq 0 ]; then
+        log "INFO" "Data clone successful"
+        break
+      fi
+    done
+    mariabackup --prepare --target-dir=/var/lib/mysql
+    rm /scripts/pod_ip_address.txt
+  fi
   rm /scripts/clone.txt
 fi
 
@@ -236,6 +244,12 @@ while true; do
 
         echo "master replica's current gtid position is $gtid"
         rm -rf /scripts/gtid.txt
+        # ensure replication user
+        create_replication_used
+        # ensure maxscale user
+        create_maxscale_user
+        # ensure monitor user
+        create_monitor_user
         join_by_gtid
     fi
     log "INFO" "waiting for mysql process id  = $pid"
