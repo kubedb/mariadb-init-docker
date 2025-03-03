@@ -68,7 +68,7 @@ function wait_for_mysqld_running() {
     fi
     log "INFO" "mysql daemon is ready to use......."
 }
-
+joining_for_first_time=0
 function create_replication_user() {
     # https://mariadb.com/kb/en/setting-up-replication/
     log "INFO" "Checking whether replication user exist or not......"
@@ -80,10 +80,8 @@ function create_replication_user() {
     if [[ "$out" -eq "0" ]]; then
         joining_for_first_time=1
         log "INFO" "Replication user not found. Creating new replication user........"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
-        retry 120 ${mysql} -N -e "CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
-        retry 120 ${mysql} -N -e "GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
     else
         log "INFO" "Replication user exists. Skipping creating new one......."
     fi
@@ -98,17 +96,15 @@ function create_maxscale_user() {
     # if the user doesn't exist, crete new one.
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Maxscale user not found. Creating new maxscale user........"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
-        retry 120 ${mysql} -N -e "CREATE USER 'maxscale'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
-        retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.user TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.db TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.tables_priv TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.columns_priv TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.procs_priv TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.proxies_priv TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "GRANT SELECT ON mysql.roles_mapping TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "GRANT SHOW DATABASES ON *.* TO 'maxscale'@'%';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.user TO 'maxscale'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.db TO 'maxscale'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.tables_priv TO 'maxscale'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.columns_priv TO 'maxscale'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.procs_priv TO 'maxscale'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.proxies_priv TO 'maxscale'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.roles_mapping TO 'maxscale'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SHOW DATABASES ON *.* TO 'maxscale'@'%';"
     else
         log "INFO" "Maxscale user exists. Skipping creating new one......."
     fi
@@ -124,11 +120,9 @@ function create_monitor_user() {
     # if the user doesn't exist, crete new one.
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Monitor user not found. Creating new monitor user........"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
-        retry 120 ${mysql} -N -e "CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
-        retry 120 ${mysql} -N -e "GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
-        retry 120 ${mysql} -N -e "GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
     else
         log "INFO" "Monitor user exists. Skipping creating new one......."
     fi
@@ -136,38 +130,34 @@ function create_monitor_user() {
 function bootstrap_cluster() {
 
     echo "this is master node"
-    # ensure replication user
-    create_replication_user
-
-    # ensure maxscale user
-    create_maxscale_user
-
-    # ensure monitor user
-    create_monitor_user
+    local mysql="$mysql_header --host=$localhost"
+    retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
 }
 
-function join_to_cluster() {
+function join_to_master-by-current-pos() {
     # member try to join into the existing group as old instance
     log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
     local mysql="$mysql_header --host=$localhost"
     log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
+    retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-#    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
-    retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
+
     echo "end join to master node by gtid"
 }
 
-function join_by_gtid() {
+function join_to_master-by-slave-pos() {
     # member try to join into the existing group as old instance
     log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
     local mysql="$mysql_header --host=$localhost"
     log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-#    retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+    if [ $joining_for_first_time -eq 0 ]; then
+      retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+    fi
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
     retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
@@ -188,13 +178,11 @@ function start_mysqld_in_background() {
     pid=$!
     log "INFO" "The process ID of mysqld is '$pid'"
 }
-
+restore_backup=0
 if [ -f "/scripts/clone.txt" ]; then
-
   getGTID=$(cat /scripts/gtid.txt)
-  IFS='-' read -ra gtidSplit <<< "$getGTID"
   # Check if the length is 3 and matches the condition
-  if [[ ${#gtidSplit[@]} -eq 3 && ${gtidSplit[1]} == "1" && ${gtidSplit[2]} == "14" ]]; then
+  if [[ "$getGTID" == "" ]]; then
     echo "This is initial setup, no need to clone data through backup/restore"
   else
     echo "Waiting for the master to start streaming backup data..."
@@ -208,6 +196,7 @@ if [ -f "/scripts/clone.txt" ]; then
     done
     mariabackup --prepare --target-dir=/var/lib/mysql
     rm /scripts/pod_ip_address.txt
+    restore_backup=1
   fi
   rm /scripts/clone.txt
 fi
@@ -220,6 +209,15 @@ export member_hosts=($(echo -n ${peers[*]} | tr -d '[]'))
 
 # wait for mysqld to be ready
 wait_for_mysqld_running
+
+# ensure replication user
+create_replication_user
+
+# ensure maxscale user
+create_maxscale_user
+
+# ensure monitor user
+create_monitor_user
 
 while true; do
     kill -0 $pid
@@ -244,30 +242,26 @@ while true; do
         bootstrap_cluster
     fi
 
-    if [[ $desired_func == "join_by_gtid" ]]; then
-        # wait for the script copied by coordinator
-        while [ ! -f "/scripts/master.txt" ]; do
-            log "WARNING" "master detector file isn't present yet!"
-            sleep 1
-        done
-        master=$(cat /scripts/master.txt)
-
+    if [[ $desired_func == "join_to_master" ]]; then
+      # wait for the script copied by coordinator
+      while [ ! -f "/scripts/master.txt" ]; do
+          log "WARNING" "master detector file isn't present yet!"
+          sleep 1
+      done
+      master=$(cat /scripts/master.txt)
+      rm -rf /scripts/master.txt
+      if [ $restore_backup -eq 1 ]; then
+        join_to_master-by-current-pos
+      else
         while [ ! -f "/scripts/gtid.txt" ]; do
             log "WARNING" "gtid detector file isn't present yet!"
             sleep 1
         done
         gtid=$(cat /scripts/gtid.txt)
-
         echo "master replica's current gtid position is $gtid"
         rm -rf /scripts/gtid.txt
-        # ensure replication user
-        create_replication_used
-        # ensure maxscale user
-        create_maxscale_user
-        # ensure monitor user
-        create_monitor_user
-        join_to_cluster
-#        join_by_gtid
+        join_to_master-by-slave-pos
+      fi
     fi
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid
