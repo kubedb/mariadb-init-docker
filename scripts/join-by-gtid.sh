@@ -38,18 +38,17 @@ report_host="$HOSTNAME.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc"
 echo "report_host = $report_host "
 localhost="127.0.0.1"
 
-function join_by_gtid() {
+function join_to_master_by_gtid_slave_pos() {
     # member try to join into the existing group as old instance
     log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
     local mysql="$mysql_header --host=$localhost"
-    log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
+    log "INFO" "Resetting binlog,gtid and set gtid_slave_pos increment by one.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
     retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
-    retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
-    echo "end join to master node by gtid"
+    echo "end join to master node by gtid slave pos"
 }
 
 export mysql_header="mariadb -u ${USER} --port=3306"
@@ -76,8 +75,9 @@ if [[ $desired_func == "join_to_master" ]]; then
         sleep 1
     done
     gtid=$(cat /scripts/gtid_slave_pos.txt)
-    echo "master replica's current gtid position is $gtid"
+    echo "current gtid slave position is $gtid"
+    rm -rf /scripts/master.txt
     rm -rf /scripts/gtid_slave_pos.txt
-    join_by_gtid
+    join_to_master_by_gtid_slave_pos
 fi
 

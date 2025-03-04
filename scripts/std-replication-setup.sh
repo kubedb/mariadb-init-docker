@@ -82,6 +82,7 @@ function create_replication_user() {
         log "INFO" "Replication user not found. Creating new replication user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
     else
         log "INFO" "Replication user exists. Skipping creating new one......."
     fi
@@ -105,6 +106,7 @@ function create_maxscale_user() {
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.proxies_priv TO 'maxscale'@'%';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.roles_mapping TO 'maxscale'@'%';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SHOW DATABASES ON *.* TO 'maxscale'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
     else
         log "INFO" "Maxscale user exists. Skipping creating new one......."
     fi
@@ -123,36 +125,35 @@ function create_monitor_user() {
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
     else
         log "INFO" "Monitor user exists. Skipping creating new one......."
     fi
 }
 function bootstrap_cluster() {
-
     echo "this is master node"
     local mysql="$mysql_header --host=$localhost"
     retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=1;"
 }
 
-function join_to_master-by-current-pos() {
+function join_to_master_by_current_pos() {
     # member try to join into the existing group as old instance
-    log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
+    log "INFO" "The replica, ${report_host} is joining to master node ${master}..."
     local mysql="$mysql_header --host=$localhost"
-    log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
-    retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
+    log "INFO" "Joining to master with gtid current_pos.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
 
-    echo "end join to master node by gtid"
+    echo "end join to master node by gtid current_pos"
 }
 
-function join_to_master-by-slave-pos() {
+function join_to_master_by_slave_pos() {
     # member try to join into the existing group as old instance
-    log "INFO" "The replica, ${report_host} is joining to master node ${master} by master node's gtid..."
+    log "INFO" "The replica, ${report_host} is joining to master node ${master} by slave_pos..."
     local mysql="$mysql_header --host=$localhost"
-    log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
+    log "INFO" "Resetting binlog,gtid and set gtid_slave_pos.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
     if [ $joining_for_first_time -eq 1 ]; then
@@ -161,29 +162,31 @@ function join_to_master-by-slave-pos() {
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
     joining_for_first_time=0
-    echo "end join to master node by gtid"
+    echo "end join to master node by gtid slave_pos"
 }
 
 
 export pid
 function start_mysqld_in_background() {
     log "INFO" "Starting MySQL server with docker-entrypoint.sh mysqld $args..."
-
+    process=""
     if [[ $MARIADB_VERSION == "1:11"* ]]; then
         docker-entrypoint.sh mariadbd $args &
+        process="mariadbd"
     else
         docker-entrypoint.sh mysqld $args &
+        process="mysqld"
     fi
 
     pid=$!
-    log "INFO" "The process ID of mysqld is '$pid'"
+    log "INFO" "The process ID of $process is '$pid'"
 }
 restore_backup=0
 if [ -f "/scripts/clone.txt" ]; then
   getGTID=$(cat /scripts/gtid.txt)
   # Check if the length is 3 and matches the condition
   if [[ "$getGTID" == "" ]]; then
-    echo "This is initial setup, no need to clone data through backup/restore"
+    echo "This is initial setup, no need to clone data"
   else
     echo "Waiting for the master to start streaming backup data..."
     echo "$POD_IP">/scripts/pod_ip_address.txt
@@ -251,7 +254,7 @@ while true; do
       master=$(cat /scripts/master.txt)
       rm -rf /scripts/master.txt
       if [ $restore_backup -eq 1 ]; then
-        join_to_master-by-current-pos
+        join_to_master_by_current_pos
       else
         while [ ! -f "/scripts/gtid.txt" ]; do
             log "WARNING" "gtid detector file isn't present yet!"
@@ -260,7 +263,7 @@ while true; do
         gtid=$(cat /scripts/gtid.txt)
         echo "master replica's current gtid position is $gtid"
         rm -rf /scripts/gtid.txt
-        join_to_master-by-slave-pos
+        join_to_master_by_slave_pos
       fi
     fi
     log "INFO" "waiting for mysql process id  = $pid"
