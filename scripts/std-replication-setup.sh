@@ -68,7 +68,7 @@ function wait_for_mysqld_running() {
     fi
     log "INFO" "mysql daemon is ready to use......."
 }
-joining_for_first_time=0
+joining_for_first_time=1
 function create_replication_user() {
     # https://mariadb.com/kb/en/setting-up-replication/
     log "INFO" "Checking whether replication user exist or not......"
@@ -78,7 +78,7 @@ function create_replication_user() {
     out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='repl';" | awk '{print$1}')
     # if the user doesn't exist, crete new one.
     if [[ "$out" -eq "0" ]]; then
-        joining_for_first_time=1
+        joining_for_first_time=0
         log "INFO" "Replication user not found. Creating new replication user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
@@ -155,12 +155,12 @@ function join_to_master-by-slave-pos() {
     log "INFO" "Resetting binlog,gtid and set gtid_slave_pos to master gtid.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-    if [ $joining_for_first_time -eq 0 ]; then
+    if [ $joining_for_first_time -eq 1 ]; then
       retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     fi
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
-    retry 10 ${mysql} -N -e "SET SQL_LOG_BIN=0;"
+    joining_for_first_time=0
     echo "end join to master node by gtid"
 }
 
