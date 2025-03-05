@@ -145,7 +145,7 @@ function join_to_master_by_current_pos() {
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
     retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
     retry 10 ${mysql} -N -e "START SLAVE;"
-
+    joining_for_first_time=0
     echo "end join to master node by gtid current_pos"
 }
 
@@ -253,7 +253,7 @@ while true; do
       done
       master=$(cat /scripts/master.txt)
       rm -rf /scripts/master.txt
-      if [ $restore_backup -eq 1 ]; then
+      if [[ $restore_backup -eq 1 ]]; then
         join_to_master_by_current_pos
       else
         while [ ! -f "/scripts/gtid.txt" ]; do
@@ -265,6 +265,17 @@ while true; do
         rm -rf /scripts/gtid.txt
         join_to_master_by_slave_pos
       fi
+    fi
+
+    if [[ $desired_func == "rejoin_to_master" ]]; then
+      # wait for the script copied by coordinator
+      while [ ! -f "/scripts/master.txt" ]; do
+          log "WARNING" "master detector file isn't present yet!"
+          sleep 1
+      done
+      master=$(cat /scripts/master.txt)
+      rm -rf /scripts/master.txt
+      join_to_master_by_current_pos
     fi
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid
