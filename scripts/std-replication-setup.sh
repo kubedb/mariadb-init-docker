@@ -143,8 +143,8 @@ function join_to_master_by_current_pos() {
     log "INFO" "Joining to master with gtid current_pos.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-    retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
-    retry 10 ${mysql} -N -e "START SLAVE;"
+    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
+    retry 20 ${mysql} -N -e "START SLAVE;"
     joining_for_first_time=0
     echo "end join to master node by gtid current_pos"
 }
@@ -159,8 +159,8 @@ function join_to_master_by_slave_pos() {
     if [ $joining_for_first_time -eq 1 ]; then
       retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     fi
-    retry 10 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
-    retry 10 ${mysql} -N -e "START SLAVE;"
+    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
+    retry 20 ${mysql} -N -e "START SLAVE;"
     joining_for_first_time=0
     echo "end join to master node by gtid slave_pos"
 }
@@ -183,24 +183,18 @@ function start_mysqld_in_background() {
 }
 restore_backup=0
 if [ -f "/scripts/clone.txt" ]; then
-  getGTID=$(cat /scripts/gtid.txt)
-  # Check if the length is 3 and matches the condition
-  if [[ "$getGTID" == "" ]]; then
-    echo "This is initial setup, no need to clone data"
-  else
-    echo "Waiting for the master to start streaming backup data..."
-    echo "$POD_IP">/scripts/pod_ip_address.txt
-    while true; do
-      socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
-      if [ $? -eq 0 ]; then
-        log "INFO" "Data clone successful"
-        break
-      fi
-    done
-    mariabackup --prepare --target-dir=/var/lib/mysql
-    rm /scripts/pod_ip_address.txt
-    restore_backup=1
-  fi
+  echo "Waiting for the master to start streaming backup data..."
+  echo "$POD_IP">/scripts/pod_ip_address.txt
+  while true; do
+    socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
+    if [ $? -eq 0 ]; then
+      log "INFO" "Data clone successful"
+      break
+    fi
+  done
+  mariabackup --prepare --target-dir=/var/lib/mysql
+  rm /scripts/pod_ip_address.txt
+  restore_backup=1
   rm /scripts/clone.txt
 fi
 
