@@ -253,7 +253,7 @@ while true; do
       done
       master=$(cat /scripts/master.txt)
       rm -rf /scripts/master.txt
-      if [[ $restore_backup -eq 1 ]]; then
+      if [[ $restore_backup -eq 0 ]]; then
         join_to_master_by_current_pos
       else
         while [ ! -f "/scripts/gtid.txt" ]; do
