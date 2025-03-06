@@ -1,7 +1,7 @@
 #!/bin/sh
 
 args="$@"
-echo "INFO" "Storing default mysqld config into /etc/maxscale/maxscale.cnf"
+echo "INFO" "Storing default config into /etc/maxscale/maxscale.cnf"
 
 mkdir -p /etc/maxscale/maxscale.cnf.d
 cat >>/etc/maxscale/maxscale.cnf <<EOL

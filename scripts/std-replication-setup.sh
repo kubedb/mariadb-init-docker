@@ -34,20 +34,10 @@ function retry {
     return 0
 }
 
-# wait for the peer-list file created by coordinator
-while [ ! -f "/scripts/peer-list" ]; do
-    log "WARNING" "peer-list is not created yet"
-    sleep 1
-done
-hosts=$(cat "/scripts/peer-list")
-IFS=', ' read -r -a peers <<<"$hosts"
-echo "${peers[@]}"
-log "INFO" "hosts are ${peers[@]}"
-
 report_host="$HOSTNAME.$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc"
-echo "report_host = $report_host "
-localhost="127.0.0.1"
+echo "report_host = $report_host"
 
+localhost="127.0.0.1"
 # wait for mysql daemon be running (alive)
 function wait_for_mysqld_running() {
     local mysql="$mysql_header --host=$localhost"
@@ -68,6 +58,7 @@ function wait_for_mysqld_running() {
     fi
     log "INFO" "mysql daemon is ready to use......."
 }
+
 joining_for_first_time=1
 function create_replication_user() {
     # https://mariadb.com/kb/en/setting-up-replication/
@@ -181,28 +172,31 @@ function start_mysqld_in_background() {
     pid=$!
     log "INFO" "The process ID of $process is '$pid'"
 }
-restore_backup=0
-if [ -f "/scripts/clone.txt" ]; then
+
+backup_restored=0
+if [ -f "/scripts/receive_backup.txt" ]; then
   echo "Waiting for the master to start streaming backup data..."
-  echo "$POD_IP">/scripts/pod_ip_address.txt
+  echo "$POD_IP">/scripts/backup_receive_started.txt
   while true; do
     socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
     if [ $? -eq 0 ]; then
-      log "INFO" "Data clone successful"
+      log "INFO" "Data restore successful."
       break
+    else
+      log "INFO" "Data restore failed."
+      rm -rf /var/lib/mysql
     fi
   done
   mariabackup --prepare --target-dir=/var/lib/mysql
-  rm /scripts/pod_ip_address.txt
-  restore_backup=1
-  rm /scripts/clone.txt
+  rm /scripts/backup_receive_started.txt
+  backup_restored=1
+  rm /scripts/receive_backup.txt
 fi
 
 start_mysqld_in_background
 
 export mysql_header="mariadb -u ${USER} --port=3306"
 export MYSQL_PWD=${PASSWORD}
-export member_hosts=($(echo -n ${peers[*]} | tr -d '[]'))
 
 # wait for mysqld to be ready
 wait_for_mysqld_running
@@ -247,7 +241,7 @@ while true; do
       done
       master=$(cat /scripts/master.txt)
       rm -rf /scripts/master.txt
-      if [[ $restore_backup -eq 0 ]]; then
+      if [[ $backup_restored -eq 0 ]]; then
         join_to_master_by_current_pos
       else
         while [ ! -f "/scripts/gtid.txt" ]; do
@@ -259,17 +253,6 @@ while true; do
         rm -rf /scripts/gtid.txt
         join_to_master_by_slave_pos
       fi
-    fi
-
-    if [[ $desired_func == "rejoin_to_master" ]]; then
-      # wait for the script copied by coordinator
-      while [ ! -f "/scripts/master.txt" ]; do
-          log "WARNING" "master detector file isn't present yet!"
-          sleep 1
-      done
-      master=$(cat /scripts/master.txt)
-      rm -rf /scripts/master.txt
-      join_to_master_by_current_pos
     fi
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid

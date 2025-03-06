@@ -30,7 +30,7 @@ echo "Generated server_id -> $svr_id"
 echo "Hostname: ${HOSTNAME}"
 echo "Base Name: ${BASE_NAME}"
 
-# write on galera configuration file
+# write configuration file
 if [[ $MARIADB_VERSION == "1:11"* ]]; then
     cat >>/etc/mysql/conf.d/my.cnf <<EOL
 [mariadbd]
