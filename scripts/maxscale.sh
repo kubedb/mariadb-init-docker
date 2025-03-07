@@ -57,7 +57,11 @@ replication_user=repl
 replication_password='$MYSQL_ROOT_PASSWORD'
 EOL
 
-
+if [ "${MAXSCALE_CLUSTER:-}" == "true"  ];then
+  cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+cooperative_monitoring_locks=majority_of_running
+EOL
+fi
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 
 [RW-Split-Router]
@@ -71,6 +75,7 @@ master_failure_mode=fail_on_write
 transaction_replay=true
 slave_selection_criteria=ADAPTIVE_ROUTING
 master_accept_reads=true
+enable_root_user=true
 EOL
 
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
