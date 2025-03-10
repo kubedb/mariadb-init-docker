@@ -10,6 +10,14 @@ threads=1
 log_debug=1
 EOL
 
+if [ "${MAXSCALE_CLUSTER:-}" == "true"  ];then
+  cat >>/etc/maxscale/maxscale.cnf <<EOL
+config_sync_cluster  = ReplicationMonitor
+config_sync_user     = maxscale_confsync
+config_sync_password = '$MYSQL_ROOT_PASSWORD'
+EOL
+fi
+
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 # Auto-generated server list from environment
 EOL
