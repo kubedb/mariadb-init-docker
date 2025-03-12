@@ -132,8 +132,16 @@ function create_monitor_user() {
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Monitor user not found. Creating new monitor user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
+        #mariadb 10.6+ change SUPER-> READ_ONLY ADMIN, REPLICATION CLIENT> SLAVE MONITOR
+        if [[ "$(echo -e "1:10.7\n$MARIADB_VERSION" | sort -V | tail -n1)" == "$MARIADB_VERSION" ]]; then
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT READ_ONLY ADMIN, RELOAD on *.* to 'monitor_user'@'%';"
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SLAVE MONITOR ON *.* TO 'monitor_user'@'%';"
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT BINLOG ADMIN, REPLICATION MASTER ADMIN, REPLICATION SLAVE ADMIN ON *.* TO 'monitor_user'@'%';"
+        else
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
+        fi
+
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
     else
         log "INFO" "Monitor user exists. Skipping creating new one......."
