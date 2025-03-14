@@ -9,7 +9,8 @@ cat >>/etc/maxscale/maxscale.cnf <<EOL
 threads=1
 log_debug=1
 EOL
-#TODO: configuration sync
+#TODO: configuration sync: among maxscale nodes, when something done in a specific maxscale
+#https://mariadb.com/kb/en/mariadb-maxscale-2402-maxscale-2402-mariadb-maxscale-configuration-guide/#runtime-configuration-changes
 #if [ "${MAXSCALE_CLUSTER:-}" == "true"  ];then
 #  cat >>/etc/maxscale/maxscale.cnf <<EOL
 #config_sync_cluster  = ReplicationMonitor

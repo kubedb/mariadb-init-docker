@@ -103,23 +103,23 @@ function create_maxscale_user() {
     fi
 }
 
-
-function create_maxscale_confsync_user() {
-    log "INFO" "Checking whether maxscale user exist or not......"
-    local mysql="$mysql_header --host=$localhost"
-    # At first, ensure that the command executes without any error. Then, run the command again and extract the output.
-    retry 120 ${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale_confsync';" | awk '{print$1}'
-    out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale_confsync';" | awk '{print$1}')
-    # if the user doesn't exist, crete new one.
-    if [[ "$out" -eq "0" ]]; then
-        log "INFO" "maxscale_confsync user not found. Creating new maxscale_confsync user........"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale_confsync'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT, INSERT, UPDATE, CREATE ON mysql.maxscale_config TO maxscale_confsync@'%';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
-    else
-        log "INFO" "maxscale_confsync user exists. Skipping creating new one......."
-    fi
-}
+//TODO:
+#function create_maxscale_confsync_user() {
+#    log "INFO" "Checking whether maxscale user exist or not......"
+#    local mysql="$mysql_header --host=$localhost"
+#    # At first, ensure that the command executes without any error. Then, run the command again and extract the output.
+#    retry 120 ${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale_confsync';" | awk '{print$1}'
+#    out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale_confsync';" | awk '{print$1}')
+#    # if the user doesn't exist, crete new one.
+#    if [[ "$out" -eq "0" ]]; then
+#        log "INFO" "maxscale_confsync user not found. Creating new maxscale_confsync user........"
+#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale_confsync'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT, INSERT, UPDATE, CREATE ON mysql.maxscale_config TO maxscale_confsync@'%';"
+#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
+#    else
+#        log "INFO" "maxscale_confsync user exists. Skipping creating new one......."
+#    fi
+#}
 
 function create_monitor_user() {
     log "INFO" "Checking whether monitor user exist or not......"
@@ -236,8 +236,9 @@ create_maxscale_user
 # ensure monitor user
 create_monitor_user
 
+#TODO:
 # ensure maxscale_confsync user
-create_maxscale_confsync_user
+#create_maxscale_confsync_user
 
 while true; do
     kill -0 $pid
