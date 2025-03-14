@@ -9,6 +9,15 @@ cat >>/etc/maxscale/maxscale.cnf <<EOL
 threads=1
 log_debug=1
 EOL
+#TODO: configuration sync: among maxscale nodes, when something done in a specific maxscale
+#https://mariadb.com/kb/en/mariadb-maxscale-2402-maxscale-2402-mariadb-maxscale-configuration-guide/#runtime-configuration-changes
+#if [ "${MAXSCALE_CLUSTER:-}" == "true"  ];then
+#  cat >>/etc/maxscale/maxscale.cnf <<EOL
+#config_sync_cluster  = ReplicationMonitor
+#config_sync_user     = maxscale_confsync
+#config_sync_password = '$MYSQL_ROOT_PASSWORD'
+#EOL
+#fi
 
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 # Auto-generated server list from environment
@@ -57,7 +66,11 @@ replication_user=repl
 replication_password='$MYSQL_ROOT_PASSWORD'
 EOL
 
-
+if [ "${MAXSCALE_CLUSTER:-}" == "true"  ];then
+  cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+cooperative_monitoring_locks=majority_of_running
+EOL
+fi
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 
 [RW-Split-Router]
@@ -71,6 +84,7 @@ master_failure_mode=fail_on_write
 transaction_replay=true
 slave_selection_criteria=ADAPTIVE_ROUTING
 master_accept_reads=true
+enable_root_user=true
 EOL
 
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL

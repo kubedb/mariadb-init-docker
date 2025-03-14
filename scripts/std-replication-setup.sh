@@ -103,6 +103,24 @@ function create_maxscale_user() {
     fi
 }
 
+//TODO:
+#function create_maxscale_confsync_user() {
+#    log "INFO" "Checking whether maxscale user exist or not......"
+#    local mysql="$mysql_header --host=$localhost"
+#    # At first, ensure that the command executes without any error. Then, run the command again and extract the output.
+#    retry 120 ${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale_confsync';" | awk '{print$1}'
+#    out=$(${mysql} -N -e "select count(host) from mysql.user where mysql.user.user='maxscale_confsync';" | awk '{print$1}')
+#    # if the user doesn't exist, crete new one.
+#    if [[ "$out" -eq "0" ]]; then
+#        log "INFO" "maxscale_confsync user not found. Creating new maxscale_confsync user........"
+#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale_confsync'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT, INSERT, UPDATE, CREATE ON mysql.maxscale_config TO maxscale_confsync@'%';"
+#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
+#    else
+#        log "INFO" "maxscale_confsync user exists. Skipping creating new one......."
+#    fi
+#}
+
 function create_monitor_user() {
     log "INFO" "Checking whether monitor user exist or not......"
     local mysql="$mysql_header --host=$localhost"
@@ -114,8 +132,16 @@ function create_monitor_user() {
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Monitor user not found. Creating new monitor user........"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
+        #mariadb 10.6+ change SUPER-> READ_ONLY ADMIN, REPLICATION CLIENT> SLAVE MONITOR
+        if [[ "$(echo -e "1:10.7\n$MARIADB_VERSION" | sort -V | tail -n1)" == "$MARIADB_VERSION" ]]; then
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT READ_ONLY ADMIN, RELOAD on *.* to 'monitor_user'@'%';"
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SLAVE MONITOR ON *.* TO 'monitor_user'@'%';"
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT BINLOG ADMIN, REPLICATION MASTER ADMIN, REPLICATION SLAVE ADMIN ON *.* TO 'monitor_user'@'%';"
+        else
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
+          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
+        fi
+
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
     else
         log "INFO" "Monitor user exists. Skipping creating new one......."
@@ -209,6 +235,10 @@ create_maxscale_user
 
 # ensure monitor user
 create_monitor_user
+
+#TODO:
+# ensure maxscale_confsync user
+#create_maxscale_confsync_user
 
 while true; do
     kill -0 $pid
