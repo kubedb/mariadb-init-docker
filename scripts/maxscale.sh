@@ -33,6 +33,15 @@ address=$BASE_NAME-$((i - 1)).$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster
 port=3306
 protocol=MariaDBBackend
 EOL
+  if [[ "${TLS_ENABLE:-}" == "true" ]]; then
+    cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+ssl        = true
+ssl_cert   = /etc/ssl/maxscale/ca.crt
+ssl_key    = /etc/ssl/maxscale/tls.key
+ssl_ca     = /etc/ssl/maxscale/tls.crt
+EOL
+  fi
+
   if [[ -n "$serverList" ]]; then
       serverList+=","
   fi
@@ -95,6 +104,14 @@ service=RW-Split-Router
 protocol=MariaDBClient
 port=3306
 EOL
+if [[ "${TLS_ENABLE:-}" == "true" ]]; then
+  cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+ssl        = true
+ssl_cert   = /etc/ssl/maxscale/ca.crt
+ssl_key    = /etc/ssl/maxscale/tls.key
+ssl_ca     = /etc/ssl/maxscale/tls.crt
+EOL
+fi
 
 echo "INFO: MaxScale configuration files have been successfully created."
 IFS=' '
