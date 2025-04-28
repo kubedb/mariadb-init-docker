@@ -4,7 +4,7 @@ args="$@"
 echo "INFO" "Storing default config into /etc/maxscale/maxscale.cnf"
 
 mkdir -p /etc/maxscale/maxscale.cnf.d
-cat >>/etc/maxscale/maxscale.cnf <<EOL
+cat >/etc/maxscale/maxscale.cnf <<EOL
 [maxscale]
 threads=1
 log_debug=1
@@ -19,7 +19,7 @@ EOL
 #EOL
 #fi
 
-cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+cat >/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 # Auto-generated server list from environment
 EOL
 
@@ -33,12 +33,13 @@ address=$BASE_NAME-$((i - 1)).$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster
 port=3306
 protocol=MariaDBBackend
 EOL
-  if [[ "${TLS_ENABLE:-}" == "true" ]]; then
+  if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
     cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
-ssl        = true
-ssl_cert   = /etc/ssl/maxscale/ca.crt
-ssl_key    = /etc/ssl/maxscale/tls.key
-ssl_ca     = /etc/ssl/maxscale/tls.crt
+ssl=true
+ssl_ca=/etc/ssl/maxscale/ca.crt
+ssl_cert=/etc/ssl/maxscale/tls.crt
+ssl_key=/etc/ssl/maxscale/tls.key
+
 EOL
   fi
 
@@ -60,7 +61,6 @@ else
 fi
 
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
-
 [ReplicationMonitor]
 type=monitor
 module=mariadbmon
@@ -97,21 +97,22 @@ enable_root_user=true
 EOL
 
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
-
 [RW-Split-Listener]
 type=listener
 service=RW-Split-Router
 protocol=MariaDBClient
 port=3306
 EOL
-if [[ "${TLS_ENABLE:-}" == "true" ]]; then
+if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
   cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
-ssl        = true
-ssl_cert   = /etc/ssl/maxscale/ca.crt
-ssl_key    = /etc/ssl/maxscale/tls.key
-ssl_ca     = /etc/ssl/maxscale/tls.crt
+ssl=true
+ssl_ca=/etc/ssl/maxscale/ca.crt
+ssl_cert=/etc/ssl/maxscale/tls.crt
+ssl_key=/etc/ssl/maxscale/tls.key
 EOL
 fi
+
+cat /etc/maxscale/maxscale.cnf.d/maxscale.cnf
 
 echo "INFO: MaxScale configuration files have been successfully created."
 IFS=' '

@@ -41,6 +41,7 @@ localhost="127.0.0.1"
 # wait for mysql daemon be running (alive)
 function wait_for_mysqld_running() {
     local mysql="$mysql_header --host=$localhost"
+    echo "why? noni why? $mysql"
     for i in {900..0}; do
         out=$(${mysql} -N -e "select 1;" 2>/dev/null)
         log "INFO" "Attempt $i: Pinging '$report_host' has returned: '$out'...................................."
@@ -71,7 +72,7 @@ function create_replication_user() {
     if [[ "$out" -eq "0" ]]; then
         joining_for_first_time=0
         log "INFO" "Replication user not found. Creating new replication user........"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
     else
@@ -88,7 +89,7 @@ function create_maxscale_user() {
     # if the user doesn't exist, crete new one.
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Maxscale user not found. Creating new maxscale user........"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;;"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.user TO 'maxscale'@'%';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.db TO 'maxscale'@'%';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT ON mysql.tables_priv TO 'maxscale'@'%';"
@@ -113,7 +114,7 @@ function create_maxscale_user() {
 #    # if the user doesn't exist, crete new one.
 #    if [[ "$out" -eq "0" ]]; then
 #        log "INFO" "maxscale_confsync user not found. Creating new maxscale_confsync user........"
-#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale_confsync'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale_confsync'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;;"
 #        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT, INSERT, UPDATE, CREATE ON mysql.maxscale_config TO maxscale_confsync@'%';"
 #        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
 #    else
@@ -131,7 +132,7 @@ function create_monitor_user() {
     # if the user doesn't exist, crete new one.
     if [[ "$out" -eq "0" ]]; then
         log "INFO" "Monitor user not found. Creating new monitor user........"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;"
         #mariadb 10.6+ change SUPER-> READ_ONLY ADMIN, REPLICATION CLIENT> SLAVE MONITOR
         if [[ "$(echo -e "1:10.7\n$MARIADB_VERSION" | sort -V | tail -n1)" == "$MARIADB_VERSION" ]]; then
           retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT READ_ONLY ADMIN, RELOAD on *.* to 'monitor_user'@'%';"
@@ -160,7 +161,7 @@ function join_to_master_by_current_pos() {
     log "INFO" "Joining to master with gtid current_pos.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
+    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_SSL=1,MASTER_SSL_CA='/etc/mysql/certs/server/ca.crt',MASTER_USE_GTID = current_pos;"
     retry 20 ${mysql} -N -e "START SLAVE;"
     joining_for_first_time=0
     echo "end join to master node by gtid current_pos"
@@ -176,7 +177,7 @@ function join_to_master_by_slave_pos() {
     if [ $joining_for_first_time -eq 1 ]; then
       retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     fi
-    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
+    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_SSL=1,MASTER_SSL_CA='/etc/mysql/certs/server/ca.crt',MASTER_USE_GTID = slave_pos;"
     retry 20 ${mysql} -N -e "START SLAVE;"
     joining_for_first_time=0
     echo "end join to master node by gtid slave_pos"
@@ -221,7 +222,18 @@ fi
 
 start_mysqld_in_background
 
-export mysql_header="mariadb -u ${USER} --port=3306"
+
+echo "$REQUIRE_SSL what is the value?"
+
+if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+  echo "Is this working??"
+  export mysql_header="mariadb -u ${USER} --port=3306 --ssl-ca=/etc/mysql/certs/server/ca.crt  --ssl-cert=/etc/mysql/certs/server/tls.crt --ssl-key=/etc/mysql/certs/server/tls.key"
+  echo "Is this working?? $mysql_header"
+else
+  export mysql_header="mariadb -u ${USER} --port=3306"
+  echo "this is not valid!!!!!!"
+fi
+
 export MYSQL_PWD=${PASSWORD}
 
 # wait for mysqld to be ready
