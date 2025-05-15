@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-env | sort | grep "POD\|HOST\|NAME"
+env | sort | grep "POD\|HOST\|NAME\|SSL"
+
 args=$@
 NAMESPACE="$POD_NAMESPACE"
 USER="$MYSQL_ROOT_USERNAME"
@@ -200,7 +201,7 @@ function join_to_master_by_slave_pos() {
     else
         log "INFO" "Configuring replication without TLS"
     fi
-    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master', MASTER_USER='repl', MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD', $ssl_options, MASTER_USE_GTID=slave_pos;"
+    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master', MASTER_USER='repl', MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD' $ssl_options, MASTER_USE_GTID=slave_pos;"
     retry 20 ${mysql} -N -e "START SLAVE;"
     joining_for_first_time=0
     echo "end join to master node by gtid slave_pos"
