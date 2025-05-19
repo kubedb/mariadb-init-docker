@@ -27,6 +27,7 @@ serverList=""
 # Split HOST_LIST into an array
 for ((i=1; i<=REPLICAS; i++)); do
   cat >> /etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+
 [server$i]
 type=server
 address=$BASE_NAME-$((i - 1)).$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster.local
@@ -39,7 +40,6 @@ ssl=true
 ssl_ca=/etc/ssl/maxscale/ca.crt
 ssl_cert=/etc/ssl/maxscale/tls.crt
 ssl_key=/etc/ssl/maxscale/tls.key
-
 EOL
   fi
 
@@ -51,6 +51,7 @@ done
 
 if [[ "${UI:-}" == "true" ]]; then
   cat >>/etc/maxscale/maxscale.cnf <<EOL
+
 admin_secure_gui=false
 # this enables external access to the REST API outside of localhost
 # review / modify for any public / non development environments
@@ -61,6 +62,7 @@ else
 fi
 
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+
 [ReplicationMonitor]
 type=monitor
 module=mariadbmon
@@ -97,6 +99,7 @@ enable_root_user=true
 EOL
 
 cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+
 [RW-Split-Listener]
 type=listener
 service=RW-Split-Router
