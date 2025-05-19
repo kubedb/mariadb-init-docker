@@ -81,7 +81,11 @@ function create_replication_user() {
         log "INFO" "Replication user exists. Skipping creating new one......."
     fi
     local ssl_require=""
-    [[ "${REQUIRE_SSL:-}" == "TRUE" ]] && ssl_require="REQUIRE SSL"
+    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+      ssl_require="REQUIRE SSL"
+    else
+      ssl_require="REQUIRE NONE"
+    fi
     retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER 'repl'@'%' $ssl_require;"
 }
 
@@ -108,7 +112,11 @@ function create_maxscale_user() {
         log "INFO" "Maxscale user exists. Skipping creating new one......."
     fi
     local ssl_require=""
-    [[ "${REQUIRE_SSL:-}" == "TRUE" ]] && ssl_require="REQUIRE SSL"
+    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+      ssl_require="REQUIRE SSL"
+    else
+      ssl_require="REQUIRE NONE"
+    fi
     retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER 'maxscale'@'%' $ssl_require;"
 }
 
@@ -156,7 +164,11 @@ function create_monitor_user() {
         log "INFO" "Monitor user exists. Skipping creating new one......."
     fi
     local ssl_require=""
-    [[ "${REQUIRE_SSL:-}" == "TRUE" ]] && ssl_require="REQUIRE SSL"
+    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+      ssl_require="REQUIRE SSL"
+    else
+      ssl_require="REQUIRE NONE"
+    fi
     retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER 'monitor_user'@'%' $ssl_require;"
 }
 function bootstrap_cluster() {
@@ -166,7 +178,7 @@ function bootstrap_cluster() {
 }
 
 function join_to_master_by_current_pos() {
-    # member try to join into the existing group as old instance
+    # member try to join into the existing group as fresh install, datadir is clean and no backup is restored
     log "INFO" "The replica, ${report_host} is joining to master node ${master}..."
     local mysql="$mysql_header --host=$localhost"
     log "INFO" "Joining to master with gtid current_pos.."
