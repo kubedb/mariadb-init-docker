@@ -115,8 +115,6 @@ ssl_key=/etc/ssl/maxscale/tls.key
 EOL
 fi
 
-cat /etc/maxscale/maxscale.cnf.d/maxscale.cnf
-
 echo "INFO: MaxScale configuration files have been successfully created."
 IFS=' '
 set -- $args

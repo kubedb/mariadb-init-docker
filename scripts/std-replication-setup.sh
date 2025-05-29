@@ -61,6 +61,19 @@ function wait_for_mysqld_running() {
 }
 
 joining_for_first_time=1
+
+function alter_user(){
+      local mysql="$mysql_header --host=$localhost"
+      local ssl_require=""
+      local user="$1"
+      if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+        ssl_require="REQUIRE SSL"
+      else
+        ssl_require="REQUIRE NONE"
+      fi
+      retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER '$user'@'%' $ssl_require;"
+}
+
 function create_replication_user() {
     # https://mariadb.com/kb/en/setting-up-replication/
     log "INFO" "Checking whether replication user exist or not......"
@@ -72,21 +85,13 @@ function create_replication_user() {
     if [[ "$out" -eq "0" ]]; then
         joining_for_first_time=0
         log "INFO" "Replication user not found. Creating new replication user........"
-        local ssl_require=""
-        [[ "${REQUIRE_SSL:-}" == "TRUE" ]] && ssl_require="REQUIRE SSL"
-        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' $ssl_require;"
+        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'repl'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
     else
         log "INFO" "Replication user exists. Skipping creating new one......."
     fi
-    local ssl_require=""
-    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
-      ssl_require="REQUIRE SSL"
-    else
-      ssl_require="REQUIRE NONE"
-    fi
-    retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER 'repl'@'%' $ssl_require;"
+    alter_user "repl"
 }
 
 function create_maxscale_user() {
@@ -111,13 +116,7 @@ function create_maxscale_user() {
     else
         log "INFO" "Maxscale user exists. Skipping creating new one......."
     fi
-    local ssl_require=""
-    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
-      ssl_require="REQUIRE SSL"
-    else
-      ssl_require="REQUIRE NONE"
-    fi
-    retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER 'maxscale'@'%' $ssl_require;"
+    alter_user "maxscale"
 }
 
 #//TODO:
@@ -130,13 +129,14 @@ function create_maxscale_user() {
 #    # if the user doesn't exist, crete new one.
 #    if [[ "$out" -eq "0" ]]; then
 #        log "INFO" "maxscale_confsync user not found. Creating new maxscale_confsync user........"
-#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale_confsync'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD' REQUIRE SSL;;"
+#        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'maxscale_confsync'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
 #        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SELECT, INSERT, UPDATE, CREATE ON mysql.maxscale_config TO maxscale_confsync@'%';"
 #        retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
 #    else
 #        log "INFO" "maxscale_confsync user exists. Skipping creating new one......."
 #    fi
 #}
+
 
 function create_monitor_user() {
     log "INFO" "Checking whether monitor user exist or not......"
@@ -163,13 +163,7 @@ function create_monitor_user() {
     else
         log "INFO" "Monitor user exists. Skipping creating new one......."
     fi
-    local ssl_require=""
-    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
-      ssl_require="REQUIRE SSL"
-    else
-      ssl_require="REQUIRE NONE"
-    fi
-    retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER 'monitor_user'@'%' $ssl_require;"
+    alter_user "monitor_user"
 }
 function bootstrap_cluster() {
     echo "this is master node"
@@ -218,7 +212,6 @@ function join_to_master_by_slave_pos() {
     joining_for_first_time=0
     echo "end join to master node by gtid slave_pos"
 }
-
 
 export pid
 function start_mysqld_in_background() {
