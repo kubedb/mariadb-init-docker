@@ -4,7 +4,7 @@ args="$@"
 echo "INFO" "Storing default config into /etc/maxscale/maxscale.cnf"
 
 mkdir -p /etc/maxscale/maxscale.cnf.d
-cat >>/etc/maxscale/maxscale.cnf <<EOL
+cat >/etc/maxscale/maxscale.cnf <<EOL
 [maxscale]
 threads=1
 log_debug=1
@@ -19,7 +19,7 @@ EOL
 #EOL
 #fi
 
-cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+cat >/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
 # Auto-generated server list from environment
 EOL
 
@@ -27,12 +27,22 @@ serverList=""
 # Split HOST_LIST into an array
 for ((i=1; i<=REPLICAS; i++)); do
   cat >> /etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+
 [server$i]
 type=server
 address=$BASE_NAME-$((i - 1)).$GOVERNING_SERVICE_NAME.$POD_NAMESPACE.svc.cluster.local
 port=3306
 protocol=MariaDBBackend
 EOL
+  if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+    cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+ssl=true
+ssl_ca=/etc/ssl/maxscale/ca.crt
+ssl_cert=/etc/ssl/maxscale/tls.crt
+ssl_key=/etc/ssl/maxscale/tls.key
+EOL
+  fi
+
   if [[ -n "$serverList" ]]; then
       serverList+=","
   fi
@@ -41,6 +51,7 @@ done
 
 if [[ "${UI:-}" == "true" ]]; then
   cat >>/etc/maxscale/maxscale.cnf <<EOL
+
 admin_secure_gui=false
 # this enables external access to the REST API outside of localhost
 # review / modify for any public / non development environments
@@ -95,6 +106,14 @@ service=RW-Split-Router
 protocol=MariaDBClient
 port=3306
 EOL
+if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+  cat >>/etc/maxscale/maxscale.cnf.d/maxscale.cnf <<EOL
+ssl=true
+ssl_ca=/etc/ssl/maxscale/ca.crt
+ssl_cert=/etc/ssl/maxscale/tls.crt
+ssl_key=/etc/ssl/maxscale/tls.key
+EOL
+fi
 
 echo "INFO: MaxScale configuration files have been successfully created."
 IFS=' '

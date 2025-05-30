@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-env | sort | grep "POD\|HOST\|NAME"
+env | sort | grep "POD\|HOST\|NAME\|SSL"
+
 args=$@
 NAMESPACE="$POD_NAMESPACE"
 USER="$MYSQL_ROOT_USERNAME"
@@ -60,6 +61,19 @@ function wait_for_mysqld_running() {
 }
 
 joining_for_first_time=1
+
+function alter_user(){
+      local mysql="$mysql_header --host=$localhost"
+      local ssl_require=""
+      local user="$1"
+      if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+        ssl_require="REQUIRE SSL"
+      else
+        ssl_require="REQUIRE NONE"
+      fi
+      retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER '$user'@'%' $ssl_require;"
+}
+
 function create_replication_user() {
     # https://mariadb.com/kb/en/setting-up-replication/
     log "INFO" "Checking whether replication user exist or not......"
@@ -77,6 +91,7 @@ function create_replication_user() {
     else
         log "INFO" "Replication user exists. Skipping creating new one......."
     fi
+    alter_user "repl"
 }
 
 function create_maxscale_user() {
@@ -101,9 +116,10 @@ function create_maxscale_user() {
     else
         log "INFO" "Maxscale user exists. Skipping creating new one......."
     fi
+    alter_user "maxscale"
 }
 
-//TODO:
+#//TODO:
 #function create_maxscale_confsync_user() {
 #    log "INFO" "Checking whether maxscale user exist or not......"
 #    local mysql="$mysql_header --host=$localhost"
@@ -120,6 +136,7 @@ function create_maxscale_user() {
 #        log "INFO" "maxscale_confsync user exists. Skipping creating new one......."
 #    fi
 #}
+
 
 function create_monitor_user() {
     log "INFO" "Checking whether monitor user exist or not......"
@@ -146,6 +163,7 @@ function create_monitor_user() {
     else
         log "INFO" "Monitor user exists. Skipping creating new one......."
     fi
+    alter_user "monitor_user"
 }
 function bootstrap_cluster() {
     echo "this is master node"
@@ -154,13 +172,20 @@ function bootstrap_cluster() {
 }
 
 function join_to_master_by_current_pos() {
-    # member try to join into the existing group as old instance
+    # member try to join into the existing group as fresh install, datadir is clean and no backup is restored
     log "INFO" "The replica, ${report_host} is joining to master node ${master}..."
     local mysql="$mysql_header --host=$localhost"
     log "INFO" "Joining to master with gtid current_pos.."
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
-    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = current_pos;"
+    local ssl_options=""
+    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+        ssl_options=", MASTER_SSL=1, MASTER_SSL_CA='/etc/mysql/certs/server/ca.crt'"
+        log "INFO" "Configuring replication with TLS enabled"
+    else
+        log "INFO" "Configuring replication without TLS"
+    fi
+    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master', MASTER_USER='repl', MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD' $ssl_options, MASTER_USE_GTID=current_pos;"
     retry 20 ${mysql} -N -e "START SLAVE;"
     joining_for_first_time=0
     echo "end join to master node by gtid current_pos"
@@ -176,12 +201,17 @@ function join_to_master_by_slave_pos() {
     if [ $joining_for_first_time -eq 1 ]; then
       retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     fi
-    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master',MASTER_USER='repl',MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD',MASTER_USE_GTID = slave_pos;"
+    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+        ssl_options=", MASTER_SSL=1, MASTER_SSL_CA='/etc/mysql/certs/server/ca.crt'"
+        log "INFO" "Configuring replication with TLS enabled"
+    else
+        log "INFO" "Configuring replication without TLS"
+    fi
+    retry 20 ${mysql} -N -e "CHANGE MASTER TO MASTER_HOST='$master', MASTER_USER='repl', MASTER_PASSWORD='$MYSQL_ROOT_PASSWORD' $ssl_options, MASTER_USE_GTID=slave_pos;"
     retry 20 ${mysql} -N -e "START SLAVE;"
     joining_for_first_time=0
     echo "end join to master node by gtid slave_pos"
 }
-
 
 export pid
 function start_mysqld_in_background() {
@@ -221,7 +251,12 @@ fi
 
 start_mysqld_in_background
 
-export mysql_header="mariadb -u ${USER} --port=3306"
+if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+  export mysql_header="mariadb -u ${USER} --port=3306 --ssl-ca=/etc/mysql/certs/server/ca.crt  --ssl-cert=/etc/mysql/certs/server/tls.crt --ssl-key=/etc/mysql/certs/server/tls.key"
+else
+  export mysql_header="mariadb -u ${USER} --port=3306"
+fi
+
 export MYSQL_PWD=${PASSWORD}
 
 # wait for mysqld to be ready
@@ -287,17 +322,4 @@ while true; do
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid
 done
-
-
-
-
-
-
-
-
-
-
-
-
-
 
