@@ -114,8 +114,58 @@ ssl_cert=/etc/ssl/maxscale/tls.crt
 ssl_key=/etc/ssl/maxscale/tls.key
 EOL
 fi
-
 echo "INFO: MaxScale configuration files have been successfully created."
+
+# Merge File1 with File2 and store it in File1
+function  merge() {
+    awk '/^\[.*\]$/ {
+       section = $0
+       if (seen[section] == 0) {
+        seq[++n] = section
+        seen[section] = 1
+       }
+       next
+    }
+    /^[^=]+=[^=]+$/ {
+        split($0,kv,"=")
+        key = kv[1]
+        val = kv[2]
+        a[section, key] = val
+    }
+    END {
+       for (i = 1; i <= n; i++){
+            section = seq[i]
+            print section
+            for (k in a){
+                split(k, parts, SUBSEP)
+                if (parts[1] == section){
+                    print parts[2] "=" a[k]
+                }
+            }
+            if (i < n) print ""
+       }
+    }' $1 $2 > $1
+
+    echo "$1 merged with $2"
+}
+
+function mergeCustomConfig() {
+    defultConfig = "/etc/maxscale/maxscale.cnf"
+    customConfig = ("/etc/maxscale/maxscale.custom.d"/*.cnf)
+
+    # Check if any files are found
+    if [ -e "${customConfig[0]}"]; then
+      echo "Found custom config files"
+      for file in "${customConfig[@]}"; do
+        merge defultConfig file
+      done
+    else
+      echo "No custom config found"
+    fi
+}
+
+mergeCustomConfig
+
 IFS=' '
 set -- $args
 docker-entrypoint.sh maxscale "$@"
