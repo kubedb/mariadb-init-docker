@@ -1,7 +1,7 @@
 #!/bin/sh
 
 args="$@"
-echo "INFO" "Storing default config into /etc/maxscale/maxscale.cnf"
+echo "INFO:" "Storing default config into /etc/maxscale/maxscale.cnf"
 
 mkdir -p /etc/maxscale/maxscale.cnf.d
 cat >/etc/maxscale/maxscale.cnf <<EOL
@@ -119,6 +119,8 @@ echo "INFO: MaxScale configuration files have been successfully created."
 
 # Merge File1 with File2 and store it in File1
 function  merge() {
+    local tempFile=etc/maxscale/temp.cnf
+    touch "$tempFile"
     # Match [section] headers in the first block
     # Match key=value pairs in the second block
     # Ignore all other lines
@@ -148,9 +150,11 @@ function  merge() {
             }
             if (i < n) print ""
        }
-    }' $1 $2 > $1
+    }' $1 $2 > $tempFile
 
-    echo "$1 merged with $2"
+    mv "$tempFile" "$1"
+
+    echo "INFO: $1 merged with $2"
 }
 
 function mergeCustomConfig() {
@@ -159,12 +163,12 @@ function mergeCustomConfig() {
 
    #  Check if any files are found
     if [ -e "${customConfig[0]}" ]; then
-      echo "Found custom config files"
+      echo "INFO: Found custom config files"
       for file in "${customConfig[@]}"; do
          merge $defaultConfig  $file
       done
     else
-      echo "No custom config found"
+      echo "INFO: No custom config found"
     fi
 }
 
