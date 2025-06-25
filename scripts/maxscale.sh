@@ -124,8 +124,9 @@ function  merge() {
     # Match [section] headers in the first block
     # Match key=value pairs in the second block
     # Ignore all other lines
+    # Finally print merged configuration in the third block
     awk '/^\[.*\]$/ {
-       section = $0
+       section = tolower($0)
        if (seen[section] == 0) {
         seq[++n] = section
         seen[section] = 1
