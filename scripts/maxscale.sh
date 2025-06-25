@@ -116,8 +116,12 @@ EOL
 fi
 echo "INFO: MaxScale configuration files have been successfully created."
 
+
 # Merge File1 with File2 and store it in File1
 function  merge() {
+    # Match [section] headers in the first block
+    # Match key=value pairs in the second block
+    # Ignore all other lines
     awk '/^\[.*\]$/ {
        section = $0
        if (seen[section] == 0) {
@@ -150,14 +154,14 @@ function  merge() {
 }
 
 function mergeCustomConfig() {
-    defultConfig = "/etc/maxscale/maxscale.cnf"
-    customConfig = ("/etc/maxscale/maxscale.custom.d"/*.cnf)
+    defaultConfig=/etc/maxscale/maxscale.cnf
+    customConfig=(/etc/maxscale/maxscale.custom.d/*.cnf)
 
-    # Check if any files are found
-    if [ -e "${customConfig[0]}"]; then
+   #  Check if any files are found
+    if [ -e "${customConfig[0]}" ]; then
       echo "Found custom config files"
       for file in "${customConfig[@]}"; do
-        merge defultConfig file
+         merge $defaultConfig  $file
       done
     else
       echo "No custom config found"
