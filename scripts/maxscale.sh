@@ -23,15 +23,6 @@ EOL
 else
   echo "UI is not set to true or does not exist."
 fi
-
-if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
-  cat >>/etc/maxscale/maxscale.cnf <<EOL
-ssl=true
-ssl_ca=/etc/ssl/maxscale/ca.crt
-ssl_cert=/etc/ssl/maxscale/tls.crt
-ssl_key=/etc/ssl/maxscale/tls.key
-EOL
-fi
 #=====================[maxscale] section end ====================================
 
 #TODO: configuration sync: among maxscale nodes, when something done in a specific maxscale
@@ -119,7 +110,14 @@ service=RW-Split-Router
 protocol=MariaDBClient
 port=3306
 EOL
-
+if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+  cat >>/etc/maxscale/maxscale.cnf <<EOL
+ssl=true
+ssl_ca=/etc/ssl/maxscale/ca.crt
+ssl_cert=/etc/ssl/maxscale/tls.crt
+ssl_key=/etc/ssl/maxscale/tls.key
+EOL
+fi
 
 echo "INFO: MaxScale configuration files have been successfully created."
 
