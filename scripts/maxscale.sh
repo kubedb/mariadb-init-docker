@@ -10,6 +10,8 @@ cat > /etc/maxscale/maxscale.cnf <<EOL
 [maxscale]
 threads=1
 log_debug=1
+persist_runtime_changes=false
+load_persisted_configs=false
 EOL
 
 if [[ "${UI:-}" == "true" ]]; then
