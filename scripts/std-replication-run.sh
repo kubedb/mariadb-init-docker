@@ -29,17 +29,7 @@ while [ true ]; do
     if [ -f "/scripts/seqno" ]; then
         rm /scripts/seqno
     fi
-    RECOVERY_DONE_FILE="/tmp/recovery.done"
-    if [[ "$PITR_RESTORE" == "true" ]]; then
-        while true; do
-          sleep 2
-          echo "Point In Time Recovery In Progress. Waiting for $RECOVERY_DONE_FILE file"
-          if [[ -e "$RECOVERY_DONE_FILE" ]]; then
-            echo "$RECOVERY_DONE_FILE found."
-            break
-          fi
-        done
-    fi
+    ./scripts/ensure-restore.sh
     # start on-start script
     ./scripts/std-replication-on-start.sh $@
     sleep 1
