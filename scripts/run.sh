@@ -29,7 +29,7 @@ while [ true ]; do
     if [ -f "/scripts/seqno" ]; then
         rm /scripts/seqno
     fi
-
+    ./scripts/ensure-restore.sh
     # start on-start script
     ./scripts/on-start.sh $@
     sleep 1
