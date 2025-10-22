@@ -18,4 +18,11 @@ if [[ "$PITR_RESTORE" == "true" ]]; then
         break
       fi
     done
+    if [[ "$HOSTNAME" != *"-0" ]]; then
+        echo "Sleeping to allow node-0 to bootstrap the cluster"
+        sleep 25
+        echo "Starting MariaDB normally on $HOSTNAME"
+    fi
 fi
+
+
