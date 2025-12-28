@@ -62,16 +62,16 @@ function wait_for_mysqld_running() {
 
 joining_for_first_time=1
 
-function alter_user(){
-      local mysql="$mysql_header --host=$localhost"
-      local ssl_require=""
-      local user="$1"
-      if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+function alter_user() {
+    local mysql="$mysql_header --host=$localhost"
+    local ssl_require=""
+    local user="$1"
+    if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
         ssl_require="REQUIRE SSL"
-      else
+    else
         ssl_require="REQUIRE NONE"
-      fi
-      retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER '$user'@'%' $ssl_require;"
+    fi
+    retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;ALTER USER '$user'@'%' $ssl_require;"
 }
 
 function create_replication_user() {
@@ -137,7 +137,6 @@ function create_maxscale_user() {
 #    fi
 #}
 
-
 function create_monitor_user() {
     log "INFO" "Checking whether monitor user exist or not......"
     local mysql="$mysql_header --host=$localhost"
@@ -151,12 +150,12 @@ function create_monitor_user() {
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;CREATE USER 'monitor_user'@'%' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';"
         #mariadb 10.6+ change SUPER-> READ_ONLY ADMIN, REPLICATION CLIENT> SLAVE MONITOR
         if [[ "$(echo -e "1:10.7\n$MARIADB_VERSION" | sort -V | tail -n1)" == "$MARIADB_VERSION" ]]; then
-          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT READ_ONLY ADMIN, RELOAD on *.* to 'monitor_user'@'%';"
-          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SLAVE MONITOR ON *.* TO 'monitor_user'@'%';"
-          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT BINLOG ADMIN, REPLICATION MASTER ADMIN, REPLICATION SLAVE ADMIN ON *.* TO 'monitor_user'@'%';"
+            retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT READ_ONLY ADMIN, RELOAD on *.* to 'monitor_user'@'%';"
+            retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SLAVE MONITOR ON *.* TO 'monitor_user'@'%';"
+            retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT BINLOG ADMIN, REPLICATION MASTER ADMIN, REPLICATION SLAVE ADMIN ON *.* TO 'monitor_user'@'%';"
         else
-          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
-          retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
+            retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT SUPER, RELOAD on *.* to 'monitor_user'@'%';"
+            retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;GRANT REPLICATION CLIENT on *.* to 'monitor_user'@'%';"
         fi
 
         retry 120 ${mysql} -N -e "SET SQL_LOG_BIN=0;FLUSH PRIVILEGES;"
@@ -199,7 +198,7 @@ function join_to_master_by_slave_pos() {
     retry 20 ${mysql} -N -e "STOP SLAVE;"
     retry 20 ${mysql} -N -e "RESET SLAVE ALL;"
     if [ $joining_for_first_time -eq 1 ]; then
-      retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
+        retry 20 ${mysql} -N -e "SET GLOBAL gtid_slave_pos = '$gtid';"
     fi
     if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
         ssl_options=", MASTER_SSL=1, MASTER_SSL_CA='/etc/mysql/certs/server/ca.crt'"
@@ -231,30 +230,30 @@ function start_mysqld_in_background() {
 
 backup_restored=0
 if [ -f "/scripts/receive_backup.txt" ]; then
-  echo "Waiting for the master to start streaming backup data..."
-  echo "$POD_IP">/scripts/backup_receive_started.txt
-  while true; do
-    socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
-    if [ $? -eq 0 ]; then
-      log "INFO" "Data restore successful."
-      break
-    else
-      log "INFO" "Data restore failed."
-      rm -rf /var/lib/mysql
-    fi
-  done
-  mariabackup --prepare --target-dir=/var/lib/mysql
-  rm /scripts/backup_receive_started.txt
-  backup_restored=1
-  rm /scripts/receive_backup.txt
+    echo "Waiting for the master to start streaming backup data..."
+    echo "$POD_IP" >/scripts/backup_receive_started.txt
+    while true; do
+        socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
+        if [ $? -eq 0 ]; then
+            log "INFO" "Data restore successful."
+            break
+        else
+            log "INFO" "Data restore failed."
+            rm -rf /var/lib/mysql
+        fi
+    done
+    mariabackup --prepare --target-dir=/var/lib/mysql
+    rm /scripts/backup_receive_started.txt
+    backup_restored=1
+    rm /scripts/receive_backup.txt
 fi
 
 start_mysqld_in_background
 
 if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
-  export mysql_header="mariadb -u ${USER} --port=3306 --ssl-ca=/etc/mysql/certs/server/ca.crt  --ssl-cert=/etc/mysql/certs/server/tls.crt --ssl-key=/etc/mysql/certs/server/tls.key"
+    export mysql_header="mariadb -u ${USER} --port=3306 --ssl-ca=/etc/mysql/certs/server/ca.crt  --ssl-cert=/etc/mysql/certs/server/tls.crt --ssl-key=/etc/mysql/certs/server/tls.key"
 else
-  export mysql_header="mariadb -u ${USER} --port=3306"
+    export mysql_header="mariadb -u ${USER} --port=3306"
 fi
 
 export MYSQL_PWD=${PASSWORD}
@@ -299,27 +298,26 @@ while true; do
     fi
 
     if [[ $desired_func == "join_to_master" ]]; then
-      # wait for the script copied by coordinator
-      while [ ! -f "/scripts/master.txt" ]; do
-          log "WARNING" "master detector file isn't present yet!"
-          sleep 1
-      done
-      master=$(cat /scripts/master.txt)
-      rm -rf /scripts/master.txt
-      if [[ $backup_restored -eq 0 ]]; then
-        join_to_master_by_current_pos
-      else
-        while [ ! -f "/scripts/gtid.txt" ]; do
-            log "WARNING" "gtid detector file isn't present yet!"
+        # wait for the script copied by coordinator
+        while [ ! -f "/scripts/master.txt" ]; do
+            log "WARNING" "master detector file isn't present yet!"
             sleep 1
         done
-        gtid=$(cat /scripts/gtid.txt)
-        echo "master replica's current gtid position is $gtid"
-        rm -rf /scripts/gtid.txt
-        join_to_master_by_slave_pos
-      fi
+        master=$(cat /scripts/master.txt)
+        rm -rf /scripts/master.txt
+        if [[ $backup_restored -eq 0 ]]; then
+            join_to_master_by_current_pos
+        else
+            while [ ! -f "/scripts/gtid.txt" ]; do
+                log "WARNING" "gtid detector file isn't present yet!"
+                sleep 1
+            done
+            gtid=$(cat /scripts/gtid.txt)
+            echo "master replica's current gtid position is $gtid"
+            rm -rf /scripts/gtid.txt
+            join_to_master_by_slave_pos
+        fi
     fi
     log "INFO" "waiting for mysql process id  = $pid"
     wait $pid
 done
-

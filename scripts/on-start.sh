@@ -26,18 +26,18 @@ hosts=$(cat "/scripts/peer-list")
 log "INFO" "hosts are {$hosts}"
 
 if [[ $DISTRIBUTED == "true" ]]; then
-  while [ ! -f "/etc/podip/podip" ];do
-    sleep 1
-    echo "nsmIP not available!!!"
-  done
+    while [ ! -f "/etc/podip/podip" ]; do
+        sleep 1
+        echo "nsmIP not available!!!"
+    done
 
-  while [ ! -s /etc/podip/podip ]; do
-    sleep 1
-    echo "nsm ip not available"
-  done
+    while [ ! -s /etc/podip/podip ]; do
+        sleep 1
+        echo "nsm ip not available"
+    done
 
-  export POD_IP=$(cat /etc/podip/podip)
-  log "INFO" "pod ip is-> $POD_IP"
+    export POD_IP=$(cat /etc/podip/podip)
+    log "INFO" "pod ip is-> $POD_IP"
 fi
 
 # write on galera configuration file
