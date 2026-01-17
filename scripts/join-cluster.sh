@@ -12,7 +12,9 @@ function log() {
 
 export DATABASE_ALREADY_EXISTS=true
 
-if [[ $MARIADB_VERSION == "1:11"* ]]; then
+major=$(echo "$MARIADB_VERSION" | sed -E 's/^1:([0-9]+).*/\1/' | grep -E '^[0-9]+$' || echo "0")
+
+if [[ "$major" -ge 11 ]]; then
     docker-entrypoint.sh mariadbd $@
 else
     docker-entrypoint.sh mysqld $@
