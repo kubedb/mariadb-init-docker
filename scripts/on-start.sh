@@ -41,7 +41,9 @@ if [[ $DISTRIBUTED == "true" ]]; then
 fi
 
 # write on galera configuration file
-if [[ $MARIADB_VERSION == "1:11"* ]]; then
+major=$(echo "$MARIADB_VERSION" | sed -E 's/^1:([0-9]+).*/\1/' | grep -E '^[0-9]+$' || echo "0")
+
+if [[ "$major" -ge 11 ]]; then
     cat >>/etc/mysql/conf.d/galera.cnf <<EOL
 [mariadbd]
 binlog_format=ROW
