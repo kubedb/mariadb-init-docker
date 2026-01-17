@@ -34,4 +34,3 @@ while [ true ]; do
     ./scripts/std-replication-on-start.sh $@
     sleep 1
 done
-
