@@ -234,21 +234,110 @@ function start_mysqld_in_background() {
 backup_restored=0
 if [ -f "/scripts/receive_backup.txt" ]; then
   echo "Waiting for the master to start streaming backup data..."
-  echo "$POD_IP">/scripts/backup_receive_started.txt
-  while true; do
-    socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
-    if [ $? -eq 0 ]; then
-      log "INFO" "Data restore successful."
-      break
-    else
-      log "INFO" "Data restore failed."
-      rm -rf /var/lib/mysql
-    fi
+
+  # Wait for coordinator to write the master IP. Without this we would
+  # accept the first TCP connection from any pod in the cluster, letting
+  # a malicious pod overwrite /var/lib/mysql by racing the master.
+  MASTER_IP=""
+  for i in {60..0}; do
+      if [ -s "/scripts/master_ip.txt" ]; then
+          MASTER_IP=$(cat /scripts/master_ip.txt)
+          break
+      fi
+      sleep 1
   done
+  if [ -z "$MASTER_IP" ]; then
+      log "ERROR" "master_ip.txt not provided by coordinator within 60s — refusing to open unauthenticated backup stream listener"
+      exit 1
+  fi
+  log "INFO" "Expecting backup stream from master IP $MASTER_IP only"
+
+  echo "$POD_IP">/scripts/backup_receive_started.txt
+
+  # Bounded retries — the old script looped FOREVER on failure while
+  # wiping /var/lib/mysql each time, giving any attacker infinite
+  # chances to poison the datadir.
+  MAX_BACKUP_STREAM_ATTEMPTS=3
+  stream_attempt=0
+  stream_success=0
+  while [ $stream_attempt -lt $MAX_BACKUP_STREAM_ATTEMPTS ]; do
+      stream_attempt=$((stream_attempt + 1))
+      log "INFO" "Backup stream attempt $stream_attempt/$MAX_BACKUP_STREAM_ATTEMPTS (bind=$POD_IP, accept only from $MASTER_IP)"
+
+      # Use TCP4-LISTEN / pf=ip4 to force IPv4 address family. Without
+      # this, socat defaults to PF_UNSPEC and:
+      #   (a) the CIDR form range=X/32 is rejected ("unspecified family")
+      #   (b) the ADDR:MASK form is also unusable — socat's option lexer
+      #       treats ':' as its own address separator and truncates at it
+      #       ("syntax error in 10.244.0.10"). Forcing IPv4 lets us use
+      #       the clean /32 CIDR syntax.
+      if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+          # TLS + IP allowlist + local bind.
+          # verify=1 validates the master's cert chain against our CA.
+          # pf=ip4 forces IPv4 for range= parsing.
+          socat -u \
+              "OPENSSL-LISTEN:3307,pf=ip4,bind=${POD_IP},range=${MASTER_IP}/32,cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1,reuseaddr" \
+              STDOUT | mbstream -x -C /var/lib/mysql
+      else
+          # Plain TCP bound to pod IP + range-limited to master IP.
+          # TCP4-LISTEN is the IPv4 variant of TCP-LISTEN.
+          socat -u \
+              "TCP4-LISTEN:3307,bind=${POD_IP},range=${MASTER_IP}/32,reuseaddr" \
+              STDOUT | mbstream -x -C /var/lib/mysql
+      fi
+
+      # Check BOTH pipeline members. A plain $? only reports mbstream's
+      # exit code — when socat dies (syntax error, cert mismatch, peer
+      # rejection), mbstream sees EOF immediately and exits 0 with no
+      # work done, silently claiming success on an empty datadir.
+      socat_rc=${PIPESTATUS[0]}
+      mbstream_rc=${PIPESTATUS[1]}
+      if [ "$socat_rc" -ne 0 ] || [ "$mbstream_rc" -ne 0 ]; then
+          log "WARNING" "Backup stream pipeline failed (socat=${socat_rc}, mbstream=${mbstream_rc})"
+      elif [ ! -s /var/lib/mysql/xtrabackup_checkpoints ] && [ ! -f /var/lib/mysql/ibdata1 ]; then
+          # Both commands claimed success but no mariabackup artifacts
+          # landed. Treat as failure — prevents pod-0 starting with an
+          # empty datadir and silently passing the "restore successful"
+          # check. xtrabackup_checkpoints is written by every mariabackup
+          # stream; ibdata1 is the primary data file.
+          log "WARNING" "Backup stream reported success but datadir lacks mariabackup artifacts — treating as failure"
+      else
+          log "INFO" "Data restore successful."
+          stream_success=1
+          break
+      fi
+
+      log "WARNING" "Backup stream attempt $stream_attempt failed."
+
+      # /var/lib/mysql is a Kubernetes PVC mount point. We cannot rename
+      # or delete the mount point itself (EBUSY / permission), but we do
+      # have write access to its contents. Clean contents in place so
+      # the next mbstream extraction starts from a clean slate. Record
+      # size/file-count first for operator forensics (the actual bytes
+      # are gone either way — an attacker's poisoned stream leaves no
+      # particularly useful trace, and preserving as a subdirectory
+      # inside /var/lib/mysql confuses mariadbd's datadir scan later).
+      if [ -d /var/lib/mysql ] && [ -n "$(ls -A /var/lib/mysql 2>/dev/null)" ]; then
+          before_count=$(find /var/lib/mysql -mindepth 1 2>/dev/null | wc -l)
+          before_size=$(du -sh /var/lib/mysql 2>/dev/null | awk '{print $1}')
+          log "WARNING" "Cleaning failed restore from /var/lib/mysql (${before_count} entries, ${before_size:-unknown})"
+          if ! find /var/lib/mysql -mindepth 1 -delete 2>/dev/null; then
+              log "ERROR" "Failed to clean /var/lib/mysql contents — cannot retry safely"
+              exit 1
+          fi
+      fi
+  done
+
+  if [ $stream_success -ne 1 ]; then
+      log "ERROR" "All $MAX_BACKUP_STREAM_ATTEMPTS backup stream attempts failed — aborting (operator intervention required)"
+      exit 1
+  fi
+
   mariabackup --prepare --target-dir=/var/lib/mysql
   rm /scripts/backup_receive_started.txt
   backup_restored=1
   rm /scripts/receive_backup.txt
+  rm -f /scripts/master_ip.txt
 fi
 
 start_mysqld_in_background
