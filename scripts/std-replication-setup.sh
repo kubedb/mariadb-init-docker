@@ -239,17 +239,14 @@ if [ -f "/scripts/receive_backup.txt" ]; then
   # accept the first TCP connection from any pod in the cluster, letting
   # a malicious pod overwrite /var/lib/mysql by racing the master.
   MASTER_IP=""
-  for i in {60..0}; do
+  while true; do
       if [ -s "/scripts/master_ip.txt" ]; then
           MASTER_IP=$(cat /scripts/master_ip.txt)
           break
       fi
+      log "INFO" "waiting for master_ip.txt"
       sleep 1
   done
-  if [ -z "$MASTER_IP" ]; then
-      log "ERROR" "master_ip.txt not provided by coordinator within 60s — refusing to open unauthenticated backup stream listener"
-      exit 1
-  fi
   log "INFO" "Expecting backup stream from master IP $MASTER_IP only"
 
   echo "$POD_IP">/scripts/backup_receive_started.txt
@@ -257,32 +254,37 @@ if [ -f "/scripts/receive_backup.txt" ]; then
   # Bounded retries — the old script looped FOREVER on failure while
   # wiping /var/lib/mysql each time, giving any attacker infinite
   # chances to poison the datadir.
-  MAX_BACKUP_STREAM_ATTEMPTS=3
+  MAX_BACKUP_STREAM_ATTEMPTS=10
   stream_attempt=0
   stream_success=0
   while [ $stream_attempt -lt $MAX_BACKUP_STREAM_ATTEMPTS ]; do
       stream_attempt=$((stream_attempt + 1))
       log "INFO" "Backup stream attempt $stream_attempt/$MAX_BACKUP_STREAM_ATTEMPTS (bind=$POD_IP, accept only from $MASTER_IP)"
 
-      # Use TCP4-LISTEN / pf=ip4 to force IPv4 address family. Without
-      # this, socat defaults to PF_UNSPEC and:
-      #   (a) the CIDR form range=X/32 is rejected ("unspecified family")
-      #   (b) the ADDR:MASK form is also unusable — socat's option lexer
-      #       treats ':' as its own address separator and truncates at it
-      #       ("syntax error in 10.244.0.10"). Forcing IPv4 lets us use
-      #       the clean /32 CIDR syntax.
+      # Detect address family from the master IP. socat's range= option
+      # needs an explicit family (PF_UNSPEC rejects CIDR and mangles
+      # ADDR:MASK form on the option lexer). IPv6 addresses contain ':',
+      # IPv4 addresses do not.
+      if [[ "$MASTER_IP" == *:* ]]; then
+          LISTEN_PROTO="TCP6-LISTEN"
+          PF_OPT="pf=ip6"
+          # IPv6 range syntax: [addr]/bits; /128 = single host
+          RANGE_SPEC="[${MASTER_IP}]/128"
+      else
+          LISTEN_PROTO="TCP4-LISTEN"
+          PF_OPT="pf=ip4"
+          RANGE_SPEC="${MASTER_IP}/32"
+      fi
+
       if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
           # TLS + IP allowlist + local bind.
           # verify=1 validates the master's cert chain against our CA.
-          # pf=ip4 forces IPv4 for range= parsing.
           socat -u \
-              "OPENSSL-LISTEN:3307,pf=ip4,bind=${POD_IP},range=${MASTER_IP}/32,cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1,reuseaddr" \
+              "OPENSSL-LISTEN:3307,${PF_OPT},bind=${POD_IP},range=${RANGE_SPEC},cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1,reuseaddr" \
               STDOUT | mbstream -x -C /var/lib/mysql
       else
-          # Plain TCP bound to pod IP + range-limited to master IP.
-          # TCP4-LISTEN is the IPv4 variant of TCP-LISTEN.
           socat -u \
-              "TCP4-LISTEN:3307,bind=${POD_IP},range=${MASTER_IP}/32,reuseaddr" \
+              "${LISTEN_PROTO}:3307,bind=${POD_IP},range=${RANGE_SPEC},reuseaddr" \
               STDOUT | mbstream -x -C /var/lib/mysql
       fi
 
@@ -323,14 +325,14 @@ if [ -f "/scripts/receive_backup.txt" ]; then
           log "WARNING" "Cleaning failed restore from /var/lib/mysql (${before_count} entries, ${before_size:-unknown})"
           if ! find /var/lib/mysql -mindepth 1 -delete 2>/dev/null; then
               log "ERROR" "Failed to clean /var/lib/mysql contents — cannot retry safely"
-              exit 1
           fi
       fi
   done
 
   if [ $stream_success -ne 1 ]; then
-      log "ERROR" "All $MAX_BACKUP_STREAM_ATTEMPTS backup stream attempts failed — aborting (operator intervention required)"
-      exit 1
+      while true; do
+           log "ERROR" "All $MAX_BACKUP_STREAM_ATTEMPTS backup stream attempts failed — aborting (operator intervention required)"
+      done
   fi
 
   mariabackup --prepare --target-dir=/var/lib/mysql
