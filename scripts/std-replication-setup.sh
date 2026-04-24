@@ -300,11 +300,15 @@ if [ -f "/scripts/receive_backup.txt" ]; then
       # exit code — when socat dies (syntax error, cert mismatch, peer
       # rejection), mbstream sees EOF immediately and exits 0 with no
       # work done, silently claiming success on an empty datadir.
-      # Default empty PIPESTATUS entries to 1 so a truncated pipeline is
-      # treated as failure rather than crashing the arithmetic test with
-      # "integer expression expected".
-      socat_rc=${PIPESTATUS[0]:-1}
-      mbstream_rc=${PIPESTATUS[1]:-1}
+      #
+      # Snapshot the whole PIPESTATUS array in one step: any simple
+      # command (including a variable assignment) executed between two
+      # ${PIPESTATUS[n]} reads resets the array, so reading [0] first and
+      # then [1] would make [1] fall through to the default and report a
+      # phantom failure on every successful run.
+      pipe_status=("${PIPESTATUS[@]}")
+      socat_rc=${pipe_status[0]:-1}
+      mbstream_rc=${pipe_status[1]:-1}
       if [ "$socat_rc" -ne 0 ] || [ "$mbstream_rc" -ne 0 ]; then
           log "WARNING" "Backup stream pipeline failed (socat=${socat_rc}, mbstream=${mbstream_rc})"
           if [ -s "$socat_err" ]; then
@@ -354,7 +358,7 @@ if [ -f "/scripts/receive_backup.txt" ]; then
       done
   fi
 
-  mariabackup --prepare --target-dir=/var/lib/mysql
+  mariadb-backup --prepare --target-dir=/var/lib/mysql
   rm /scripts/backup_receive_started.txt
   backup_restored=1
   rm /scripts/receive_backup.txt
@@ -421,12 +425,31 @@ while true; do
       if [[ $backup_restored -eq 0 ]]; then
         join_to_master_by_current_pos
       else
-        while [ ! -f "/scripts/gtid.txt" ]; do
-            log "WARNING" "gtid detector file isn't present yet!"
-            sleep 1
-        done
-        gtid=$(cat /scripts/gtid.txt)
-        echo "master replica's current gtid position is $gtid"
+        # Prefer the GTID recorded INSIDE the backup at the exact
+        # moment mariabackup took the snapshot lock. The coordinator's
+        # /scripts/gtid.txt is sampled BEFORE backup-stream starts, so
+        # transactions that commit on the master while mariabackup is
+        # reading data files end up in BOTH the restored datadir and
+        # the replication stream — SET GLOBAL gtid_slave_pos with the
+        # pre-backup value would make the slave replay those commits
+        # and abort with 1062 Duplicate entry on the first row.
+        gtid=""
+        if [ -f /var/lib/mysql/mariadb_backup_info ]; then
+            gtid=$(sed -nE "s/.*GTID of the last change '([^']*)'.*/\1/p" /var/lib/mysql/mariadb_backup_info)
+            if [ -n "$gtid" ]; then
+                log "INFO" "Using gtid from mariadb_backup_info: $gtid"
+            fi
+        fi
+        if [ -z "$gtid" ]; then
+            # Fallback: coordinator-provided gtid.txt (used when no
+            # backup-stream restore happened, e.g., first cluster setup).
+            while [ ! -f "/scripts/gtid.txt" ]; do
+                log "WARNING" "gtid detector file isn't present yet!"
+                sleep 1
+            done
+            gtid=$(cat /scripts/gtid.txt)
+            log "INFO" "Using gtid from coordinator gtid.txt: $gtid"
+        fi
         rm -rf /scripts/gtid.txt
         join_to_master_by_slave_pos
       fi
