@@ -31,9 +31,10 @@ fi
 
 # Check both ends of the pipeline — a plain $? would only see socat's exit
 # code and miss a failed mariabackup upstream (producing an "apparent
-# success" while no bytes were actually transferred).
-mariabackup_rc=${PIPESTATUS[0]}
-socat_rc=${PIPESTATUS[1]}
+# success" while no bytes were actually transferred). Default empty to 1
+# so a missing PIPESTATUS entry is treated as failure, not parsed as "".
+mariabackup_rc=${PIPESTATUS[0]:-1}
+socat_rc=${PIPESTATUS[1]:-1}
 if [ "$mariabackup_rc" -eq 0 ] && [ "$socat_rc" -eq 0 ]; then
     echo "Backup data for pod $ip transferred successfully."
 else

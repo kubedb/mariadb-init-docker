@@ -52,10 +52,11 @@ function wait_for_mysqld_running() {
         sleep 1
     done
 
-    if [[ "$i" == "0" ]]; then
-        echo ""
-        log "ERROR" "Server ${report_host} failed to start in 900 seconds............."
-        exit 1
+    out=$(${mysql} -N -e "select 1;" 2>/dev/null)
+    log "INFO" "Attempt $i: Pinging '$report_host' has returned: '$out'...................................."
+    if [[ "$out" != "1" ]]; then
+        start_mysqld_in_background
+        wait_for_mysqld_running
     fi
     log "INFO" "mysql daemon is ready to use......."
 }
@@ -276,32 +277,50 @@ if [ -f "/scripts/receive_backup.txt" ]; then
           RANGE_SPEC="${MASTER_IP}/32"
       fi
 
+      # Stderr of both socat and mbstream gets captured to per-attempt
+      # log files — when the pipeline fails, the "WARNING" line below
+      # only tells us the exit codes, not the actual parse/connection
+      # errors. The logs survive after the pipeline exits and are
+      # printed below so `kubectl logs` sees them.
+      socat_err="/tmp/socat.err.${stream_attempt}"
+      mbstream_err="/tmp/mbstream.err.${stream_attempt}"
       if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
           # TLS + IP allowlist + local bind.
           # verify=1 validates the master's cert chain against our CA.
           socat -u \
               "OPENSSL-LISTEN:3307,${PF_OPT},bind=${POD_IP},range=${RANGE_SPEC},cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1,reuseaddr" \
-              STDOUT | mbstream -x -C /var/lib/mysql
+              STDOUT 2>"$socat_err" | mbstream -x -C /var/lib/mysql 2>"$mbstream_err"
       else
           socat -u \
               "${LISTEN_PROTO}:3307,bind=${POD_IP},range=${RANGE_SPEC},reuseaddr" \
-              STDOUT | mbstream -x -C /var/lib/mysql
+              STDOUT 2>"$socat_err" | mbstream -x -C /var/lib/mysql 2>"$mbstream_err"
       fi
 
       # Check BOTH pipeline members. A plain $? only reports mbstream's
       # exit code — when socat dies (syntax error, cert mismatch, peer
       # rejection), mbstream sees EOF immediately and exits 0 with no
       # work done, silently claiming success on an empty datadir.
-      socat_rc=${PIPESTATUS[0]}
-      mbstream_rc=${PIPESTATUS[1]}
+      # Default empty PIPESTATUS entries to 1 so a truncated pipeline is
+      # treated as failure rather than crashing the arithmetic test with
+      # "integer expression expected".
+      socat_rc=${PIPESTATUS[0]:-1}
+      mbstream_rc=${PIPESTATUS[1]:-1}
       if [ "$socat_rc" -ne 0 ] || [ "$mbstream_rc" -ne 0 ]; then
           log "WARNING" "Backup stream pipeline failed (socat=${socat_rc}, mbstream=${mbstream_rc})"
-      elif [ ! -s /var/lib/mysql/xtrabackup_checkpoints ] && [ ! -f /var/lib/mysql/ibdata1 ]; then
+          if [ -s "$socat_err" ]; then
+              log "WARNING" "socat stderr: $(tr '\n' '|' <"$socat_err" | head -c 2000)"
+          fi
+          if [ -s "$mbstream_err" ]; then
+              log "WARNING" "mbstream stderr: $(tr '\n' '|' <"$mbstream_err" | head -c 2000)"
+          fi
+      elif [ ! -s /var/lib/mysql/mariadb_backup_checkpoints ] && [ ! -f /var/lib/mysql/ibdata1 ]; then
           # Both commands claimed success but no mariabackup artifacts
           # landed. Treat as failure — prevents pod-0 starting with an
           # empty datadir and silently passing the "restore successful"
-          # check. xtrabackup_checkpoints is written by every mariabackup
-          # stream; ibdata1 is the primary data file.
+          # check. mariadb_backup_checkpoints is written by every
+          # mariabackup stream; ibdata1 is the primary data file.
+          # (Percona's xtrabackup uses xtrabackup_checkpoints, but
+          # MariaDB's mariabackup writes mariadb_backup_checkpoints.)
           log "WARNING" "Backup stream reported success but datadir lacks mariabackup artifacts — treating as failure"
       else
           log "INFO" "Data restore successful."
