@@ -23,11 +23,11 @@ if [[ "$ip" == *:* ]]; then
     CONNECT_PROTO="TCP6"
     PF_OPT="pf=ip6"
     # IPv6 needs brackets around the address in TCP:host:port form
-    ADDR_SPEC="[${ip}]:3307"
+    ADDR_SPEC="[${ip}]:4444"
 else
     CONNECT_PROTO="TCP4"
     PF_OPT="pf=ip4"
-    ADDR_SPEC="${ip}:3307"
+    ADDR_SPEC="${ip}:4444"
 fi
 
 if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then

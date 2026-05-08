@@ -288,11 +288,11 @@ if [ -f "/scripts/receive_backup.txt" ]; then
           # TLS + IP allowlist + local bind.
           # verify=1 validates the master's cert chain against our CA.
           socat -u \
-              "OPENSSL-LISTEN:3307,${PF_OPT},bind=${POD_IP},range=${RANGE_SPEC},cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1,reuseaddr" \
+              "OPENSSL-LISTEN:4444,${PF_OPT},bind=${POD_IP},range=${RANGE_SPEC},cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1,reuseaddr" \
               STDOUT 2>"$socat_err" | mbstream -x -C /var/lib/mysql 2>"$mbstream_err"
       else
           socat -u \
-              "${LISTEN_PROTO}:3307,bind=${POD_IP},range=${RANGE_SPEC},reuseaddr" \
+              "${LISTEN_PROTO}:4444,bind=${POD_IP},range=${RANGE_SPEC},reuseaddr" \
               STDOUT 2>"$socat_err" | mbstream -x -C /var/lib/mysql 2>"$mbstream_err"
       fi
 
