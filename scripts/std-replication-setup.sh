@@ -48,8 +48,15 @@ function wait_for_mysqld_running() {
         if [[ "$out" == "1" ]]; then
             break
         fi
-        echo -n .
-        sleep 1
+        kill -0 $pid
+        exit="$?"
+        if [[ "$exit" == "0" ]]; then
+            echo -n .
+            sleep 1
+        else
+            sleep 10
+            break
+        fi
     done
 
     out=$(${mysql} -N -e "select 1;" 2>/dev/null)
@@ -166,6 +173,48 @@ function create_monitor_user() {
     fi
     alter_user "monitor_user"
 }
+# is_node_running_correctly returns 0 (true) when this node is healthy
+# enough that no further coordinator signal is needed:
+#
+#   * Slave path: SHOW SLAVE STATUS returns a row AND both threads
+#     (Slave_IO_Running and Slave_SQL_Running) are Yes.
+#   * Master path: SHOW SLAVE STATUS empty AND at least one replica is
+#     connected (SHOW SLAVE HOSTS non-empty) — proving this node is
+#     actively serving as master.
+#
+# Returns 1 (false) if the node is unconfigured, a slave with broken
+# replication, or a master with no connected replicas — in any of those
+# cases the loop should wait for the coordinator's signal so that
+# bootstrap_cluster / join_to_master can run.
+function is_node_running_correctly() {
+    local mysql="$mysql_header --host=$localhost"
+
+    # Slave check: SHOW SLAVE STATUS, then verify both threads are Yes.
+    # DO NOT pass -N here — the \G format relies on column names as
+    # labels, and -N strips them, breaking the awk match below.
+    local slave_status
+    slave_status=$(${mysql} -e "SHOW SLAVE STATUS\G" 2>/dev/null)
+    local slave_io slave_sql
+    slave_io=$(echo "$slave_status" | awk -F': ' '/Slave_IO_Running:/{print $2; exit}')
+    slave_sql=$(echo "$slave_status" | awk -F': ' '/Slave_SQL_Running:/{print $2; exit}')
+    if [[ -n "$slave_io" || -n "$slave_sql" ]]; then
+        if [[ "$slave_io" == "Yes" && "$slave_sql" == "Yes" ]]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    # Master check: at least one replica connected. -N strips the header
+    # row so wc -l counts only data rows.
+    local slave_hosts
+    slave_hosts=$(${mysql} -N -e "SHOW SLAVE HOSTS;" 2>/dev/null | wc -l)
+    if [[ "$slave_hosts" -gt 0 ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 function bootstrap_cluster() {
     echo "this is master node"
     local mysql="$mysql_header --host=$localhost"
@@ -402,11 +451,28 @@ while true; do
         wait_for_mysqld_running
     fi
 
-    # wait for the script copied by coordinator
+    # Wait for the coordinator's signal — but break early if the node is
+    # already replicating correctly (slave with both threads Yes, or
+    # master with at least one connected replica). The coordinator only
+    # writes signal.txt for bootstrap/join events, so an already-healthy
+    # node would otherwise wait here forever after a mysqld restart.
     while [ ! -f "/scripts/signal.txt" ]; do
         log "WARNING" "signal is not present yet!"
         sleep 1
+        if is_node_running_correctly; then
+            break
+        fi
     done
+
+    # If we broke out because the node is healthy, there's no signal to
+    # consume — just skip the action block and go straight to wait $pid.
+    if [ ! -f "/scripts/signal.txt" ]; then
+        log "INFO" "node is replicating correctly — skipping signal-driven action"
+        log "INFO" "waiting for mysql process id  = $pid"
+        wait $pid
+        continue
+    fi
+
     desired_func=$(cat /scripts/signal.txt)
     rm -rf /scripts/signal.txt
     log "INFO" "going to execute $desired_func"
