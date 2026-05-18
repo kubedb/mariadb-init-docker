@@ -14,7 +14,11 @@ socat_err="/tmp/socat.err"
 : >"$socat_err"
 
 ip=$(cat "/scripts/joiner_ip.txt")
-echo "Start master data transferring..ip $ip"
+host=""
+if [[ -f /scripts/joiner_host.txt ]]; then
+    host=$(cat /scripts/joiner_host.txt)
+fi
+echo "Start master data transferring..ip=$ip host=${host:-<unset>}"
 export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
 
 # Detect address family from the joiner IP so this works on IPv4-only,
@@ -30,12 +34,23 @@ else
     ADDR_SPEC="${ip}:4444"
 fi
 
+# TLS connect uses the pod FQDN, not the IP — KubeDB-issued server certs
+# carry a wildcard SAN *.<governing-svc>.<ns>.svc but no pod-IP SAN, so
+# socat's OPENSSL verify=1 hostname comparison fails when the connect
+# address is an IP ("commonName does not match hostname"). DNS hostnames
+# don't contain ':', so the IPv6 bracket form is only needed for raw IPs.
+if [[ -n "$host" ]]; then
+    TLS_ADDR_SPEC="${host}:4444"
+else
+    TLS_ADDR_SPEC="${ADDR_SPEC}"
+fi
+
 if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
     # TLS mode: validate joiner's cert against our CA. Joiner's listener
     # also validates our cert (verify=1 on both sides → mutual auth).
     mariadb-backup --backup --stream=mbstream --user=root 2>"$mariabackup_err" | \
         socat -u STDIN \
-        "OPENSSL:${ADDR_SPEC},${PF_OPT},cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1" 2>"$socat_err"
+        "OPENSSL:${TLS_ADDR_SPEC},${PF_OPT},cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1" 2>"$socat_err"
 else
     # Plain TCP. Family-explicit variant matches the joiner's listener.
     mariadb-backup --backup --stream=mbstream --user=root 2>"$mariabackup_err" | \
@@ -70,4 +85,4 @@ else
         tail -c 2000 "$socat_err"
     fi
 fi
-rm /scripts/joiner_ip.txt
+rm -f /scripts/joiner_ip.txt /scripts/joiner_host.txt
