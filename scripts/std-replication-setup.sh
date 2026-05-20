@@ -48,14 +48,22 @@ function wait_for_mysqld_running() {
         if [[ "$out" == "1" ]]; then
             break
         fi
-        echo -n .
-        sleep 1
+        kill -0 $pid
+        exit="$?"
+        if [[ "$exit" == "0" ]]; then
+            echo -n .
+            sleep 1
+        else
+            sleep 10
+            break
+        fi
     done
 
-    if [[ "$i" == "0" ]]; then
-        echo ""
-        log "ERROR" "Server ${report_host} failed to start in 900 seconds............."
-        exit 1
+    out=$(${mysql} -N -e "select 1;" 2>/dev/null)
+    log "INFO" "Attempt $i: Pinging '$report_host' has returned: '$out'...................................."
+    if [[ "$out" != "1" ]]; then
+        start_mysqld_in_background
+        wait_for_mysqld_running
     fi
     log "INFO" "mysql daemon is ready to use......."
 }
@@ -165,6 +173,48 @@ function create_monitor_user() {
     fi
     alter_user "monitor_user"
 }
+# is_node_running_correctly returns 0 (true) when this node is healthy
+# enough that no further coordinator signal is needed:
+#
+#   * Slave path: SHOW SLAVE STATUS returns a row AND both threads
+#     (Slave_IO_Running and Slave_SQL_Running) are Yes.
+#   * Master path: SHOW SLAVE STATUS empty AND at least one replica is
+#     connected (SHOW SLAVE HOSTS non-empty) — proving this node is
+#     actively serving as master.
+#
+# Returns 1 (false) if the node is unconfigured, a slave with broken
+# replication, or a master with no connected replicas — in any of those
+# cases the loop should wait for the coordinator's signal so that
+# bootstrap_cluster / join_to_master can run.
+function is_node_running_correctly() {
+    local mysql="$mysql_header --host=$localhost"
+
+    # Slave check: SHOW SLAVE STATUS, then verify both threads are Yes.
+    # DO NOT pass -N here — the \G format relies on column names as
+    # labels, and -N strips them, breaking the awk match below.
+    local slave_status
+    slave_status=$(${mysql} -e "SHOW SLAVE STATUS\G" 2>/dev/null)
+    local slave_io slave_sql
+    slave_io=$(echo "$slave_status" | awk -F': ' '/Slave_IO_Running:/{print $2; exit}')
+    slave_sql=$(echo "$slave_status" | awk -F': ' '/Slave_SQL_Running:/{print $2; exit}')
+    if [[ -n "$slave_io" || -n "$slave_sql" ]]; then
+        if [[ "$slave_io" == "Yes" && "$slave_sql" == "Yes" ]]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    # Master check: at least one replica connected. -N strips the header
+    # row so wc -l counts only data rows.
+    local slave_hosts
+    slave_hosts=$(${mysql} -N -e "SHOW SLAVE HOSTS;" 2>/dev/null | wc -l)
+    if [[ "$slave_hosts" -gt 0 ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 function bootstrap_cluster() {
     echo "this is master node"
     local mysql="$mysql_header --host=$localhost"
@@ -234,21 +284,134 @@ function start_mysqld_in_background() {
 backup_restored=0
 if [ -f "/scripts/receive_backup.txt" ]; then
   echo "Waiting for the master to start streaming backup data..."
-  echo "$POD_IP">/scripts/backup_receive_started.txt
+
+  # Wait for coordinator to write the master IP. Without this we would
+  # accept the first TCP connection from any pod in the cluster, letting
+  # a malicious pod overwrite /var/lib/mysql by racing the master.
+  MASTER_IP=""
   while true; do
-    socat -u TCP-LISTEN:3307 STDOUT | mbstream -x -C /var/lib/mysql
-    if [ $? -eq 0 ]; then
-      log "INFO" "Data restore successful."
-      break
-    else
-      log "INFO" "Data restore failed."
-      rm -rf /var/lib/mysql
-    fi
+      if [ -s "/scripts/master_ip.txt" ]; then
+          MASTER_IP=$(cat /scripts/master_ip.txt)
+          break
+      fi
+      log "INFO" "waiting for master_ip.txt"
+      sleep 1
   done
-  mariabackup --prepare --target-dir=/var/lib/mysql
+  log "INFO" "Expecting backup stream from master IP $MASTER_IP only"
+
+  echo "$POD_IP">/scripts/backup_receive_started.txt
+
+  # Bounded retries — the old script looped FOREVER on failure while
+  # wiping /var/lib/mysql each time, giving any attacker infinite
+  # chances to poison the datadir.
+  MAX_BACKUP_STREAM_ATTEMPTS=10
+  stream_attempt=0
+  stream_success=0
+  while [ $stream_attempt -lt $MAX_BACKUP_STREAM_ATTEMPTS ]; do
+      stream_attempt=$((stream_attempt + 1))
+      log "INFO" "Backup stream attempt $stream_attempt/$MAX_BACKUP_STREAM_ATTEMPTS (bind=$POD_IP, accept only from $MASTER_IP)"
+
+      # Detect address family from the master IP. socat's range= option
+      # needs an explicit family (PF_UNSPEC rejects CIDR and mangles
+      # ADDR:MASK form on the option lexer). IPv6 addresses contain ':',
+      # IPv4 addresses do not.
+      if [[ "$MASTER_IP" == *:* ]]; then
+          LISTEN_PROTO="TCP6-LISTEN"
+          PF_OPT="pf=ip6"
+          # IPv6 range syntax: [addr]/bits; /128 = single host
+          RANGE_SPEC="[${MASTER_IP}]/128"
+      else
+          LISTEN_PROTO="TCP4-LISTEN"
+          PF_OPT="pf=ip4"
+          RANGE_SPEC="${MASTER_IP}/32"
+      fi
+
+      # Stderr of both socat and mbstream gets captured to per-attempt
+      # log files — when the pipeline fails, the "WARNING" line below
+      # only tells us the exit codes, not the actual parse/connection
+      # errors. The logs survive after the pipeline exits and are
+      # printed below so `kubectl logs` sees them.
+      socat_err="/tmp/socat.err.${stream_attempt}"
+      mbstream_err="/tmp/mbstream.err.${stream_attempt}"
+      if [[ "${REQUIRE_SSL:-}" == "TRUE" ]]; then
+          # TLS + IP allowlist + local bind.
+          # verify=1 validates the master's cert chain against our CA.
+          socat -u \
+              "OPENSSL-LISTEN:4444,${PF_OPT},bind=${POD_IP},range=${RANGE_SPEC},cert=/etc/mysql/certs/server/tls.crt,key=/etc/mysql/certs/server/tls.key,cafile=/etc/mysql/certs/server/ca.crt,verify=1,reuseaddr" \
+              STDOUT 2>"$socat_err" | mbstream -x -C /var/lib/mysql 2>"$mbstream_err"
+      else
+          socat -u \
+              "${LISTEN_PROTO}:4444,bind=${POD_IP},range=${RANGE_SPEC},reuseaddr" \
+              STDOUT 2>"$socat_err" | mbstream -x -C /var/lib/mysql 2>"$mbstream_err"
+      fi
+
+      # Check BOTH pipeline members. A plain $? only reports mbstream's
+      # exit code — when socat dies (syntax error, cert mismatch, peer
+      # rejection), mbstream sees EOF immediately and exits 0 with no
+      # work done, silently claiming success on an empty datadir.
+      #
+      # Snapshot the whole PIPESTATUS array in one step: any simple
+      # command (including a variable assignment) executed between two
+      # ${PIPESTATUS[n]} reads resets the array, so reading [0] first and
+      # then [1] would make [1] fall through to the default and report a
+      # phantom failure on every successful run.
+      pipe_status=("${PIPESTATUS[@]}")
+      socat_rc=${pipe_status[0]:-1}
+      mbstream_rc=${pipe_status[1]:-1}
+      if [ "$socat_rc" -ne 0 ] || [ "$mbstream_rc" -ne 0 ]; then
+          log "WARNING" "Backup stream pipeline failed (socat=${socat_rc}, mbstream=${mbstream_rc})"
+          if [ -s "$socat_err" ]; then
+              log "WARNING" "socat stderr: $(tr '\n' '|' <"$socat_err" | head -c 2000)"
+          fi
+          if [ -s "$mbstream_err" ]; then
+              log "WARNING" "mbstream stderr: $(tr '\n' '|' <"$mbstream_err" | head -c 2000)"
+          fi
+      elif [ ! -s /var/lib/mysql/mariadb_backup_checkpoints ] && [ ! -f /var/lib/mysql/ibdata1 ]; then
+          # Both commands claimed success but no mariabackup artifacts
+          # landed. Treat as failure — prevents pod-0 starting with an
+          # empty datadir and silently passing the "restore successful"
+          # check. mariadb_backup_checkpoints is written by every
+          # mariabackup stream; ibdata1 is the primary data file.
+          # (Percona's xtrabackup uses xtrabackup_checkpoints, but
+          # MariaDB's mariabackup writes mariadb_backup_checkpoints.)
+          log "WARNING" "Backup stream reported success but datadir lacks mariabackup artifacts — treating as failure"
+      else
+          log "INFO" "Data restore successful."
+          stream_success=1
+          break
+      fi
+
+      log "WARNING" "Backup stream attempt $stream_attempt failed."
+
+      # /var/lib/mysql is a Kubernetes PVC mount point. We cannot rename
+      # or delete the mount point itself (EBUSY / permission), but we do
+      # have write access to its contents. Clean contents in place so
+      # the next mbstream extraction starts from a clean slate. Record
+      # size/file-count first for operator forensics (the actual bytes
+      # are gone either way — an attacker's poisoned stream leaves no
+      # particularly useful trace, and preserving as a subdirectory
+      # inside /var/lib/mysql confuses mariadbd's datadir scan later).
+      if [ -d /var/lib/mysql ] && [ -n "$(ls -A /var/lib/mysql 2>/dev/null)" ]; then
+          before_count=$(find /var/lib/mysql -mindepth 1 2>/dev/null | wc -l)
+          before_size=$(du -sh /var/lib/mysql 2>/dev/null | awk '{print $1}')
+          log "WARNING" "Cleaning failed restore from /var/lib/mysql (${before_count} entries, ${before_size:-unknown})"
+          if ! find /var/lib/mysql -mindepth 1 -delete 2>/dev/null; then
+              log "ERROR" "Failed to clean /var/lib/mysql contents — cannot retry safely"
+          fi
+      fi
+  done
+
+  if [ $stream_success -ne 1 ]; then
+      while true; do
+           log "ERROR" "All $MAX_BACKUP_STREAM_ATTEMPTS backup stream attempts failed — aborting (operator intervention required)"
+      done
+  fi
+
+  mariadb-backup --prepare --target-dir=/var/lib/mysql
   rm /scripts/backup_receive_started.txt
   backup_restored=1
   rm /scripts/receive_backup.txt
+  rm -f /scripts/master_ip.txt
 fi
 
 start_mysqld_in_background
@@ -288,11 +451,28 @@ while true; do
         wait_for_mysqld_running
     fi
 
-    # wait for the script copied by coordinator
+    # Wait for the coordinator's signal — but break early if the node is
+    # already replicating correctly (slave with both threads Yes, or
+    # master with at least one connected replica). The coordinator only
+    # writes signal.txt for bootstrap/join events, so an already-healthy
+    # node would otherwise wait here forever after a mysqld restart.
     while [ ! -f "/scripts/signal.txt" ]; do
         log "WARNING" "signal is not present yet!"
         sleep 1
+        if is_node_running_correctly; then
+            break
+        fi
     done
+
+    # If we broke out because the node is healthy, there's no signal to
+    # consume — just skip the action block and go straight to wait $pid.
+    if [ ! -f "/scripts/signal.txt" ]; then
+        log "INFO" "node is replicating correctly — skipping signal-driven action"
+        log "INFO" "waiting for mysql process id  = $pid"
+        wait $pid
+        continue
+    fi
+
     desired_func=$(cat /scripts/signal.txt)
     rm -rf /scripts/signal.txt
     log "INFO" "going to execute $desired_func"
@@ -311,12 +491,31 @@ while true; do
       if [[ $backup_restored -eq 0 ]]; then
         join_to_master_by_current_pos
       else
-        while [ ! -f "/scripts/gtid.txt" ]; do
-            log "WARNING" "gtid detector file isn't present yet!"
-            sleep 1
-        done
-        gtid=$(cat /scripts/gtid.txt)
-        echo "master replica's current gtid position is $gtid"
+        # Prefer the GTID recorded INSIDE the backup at the exact
+        # moment mariabackup took the snapshot lock. The coordinator's
+        # /scripts/gtid.txt is sampled BEFORE backup-stream starts, so
+        # transactions that commit on the master while mariabackup is
+        # reading data files end up in BOTH the restored datadir and
+        # the replication stream — SET GLOBAL gtid_slave_pos with the
+        # pre-backup value would make the slave replay those commits
+        # and abort with 1062 Duplicate entry on the first row.
+        gtid=""
+        if [ -f /var/lib/mysql/mariadb_backup_info ]; then
+            gtid=$(sed -nE "s/.*GTID of the last change '([^']*)'.*/\1/p" /var/lib/mysql/mariadb_backup_info)
+            if [ -n "$gtid" ]; then
+                log "INFO" "Using gtid from mariadb_backup_info: $gtid"
+            fi
+        fi
+        if [ -z "$gtid" ]; then
+            # Fallback: coordinator-provided gtid.txt (used when no
+            # backup-stream restore happened, e.g., first cluster setup).
+            while [ ! -f "/scripts/gtid.txt" ]; do
+                log "WARNING" "gtid detector file isn't present yet!"
+                sleep 1
+            done
+            gtid=$(cat /scripts/gtid.txt)
+            log "INFO" "Using gtid from coordinator gtid.txt: $gtid"
+        fi
         rm -rf /scripts/gtid.txt
         join_to_master_by_slave_pos
       fi
