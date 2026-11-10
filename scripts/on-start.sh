@@ -83,6 +83,43 @@ wsrep_node_address=${POD_IP}
 EOL
 fi
 
+# DC-DR (one Galera cluster per data center + an async GTID channel between them). Written on every
+# start, including the in-place restart after a crash (run.sh loops), and never appended to:
+# - read_only=ON on every boot: a restarted node must never be writable. Galera has no election, so
+#   nothing else lifts it; the coordinator opens writes only in the active data center.
+# - server_id is the same on all nodes of a data center (wsrep_gtid_mode needs it) and differs
+#   between data centers; the GTID domain is per data center. A re-seeded data center moves to a
+#   new domain (RESET MASTER is refused inside Galera); the coordinator records it on the data
+#   volume, and that value wins over the initial one from the operator.
+# - kubedb_system holds the health check writes, which root makes even on a read_only node: they
+#   must never reach the binlog, or the standby mints GTIDs the active side does not have.
+# - skip_slave_start: a node that held the cross-DC channel must not restart it on its own.
+if [[ "$DCDR_ENABLED" == "true" ]]; then
+    domain_file=/var/lib/mysql/.dcdr-gtid-domain-id
+    domain_id=${DCDR_GTID_DOMAIN_ID:?DCDR_GTID_DOMAIN_ID is required with DCDR_ENABLED}
+    if [[ -s "$domain_file" ]] && grep -qE '^[0-9]+$' "$domain_file"; then
+        domain_id=$(cat "$domain_file")
+    fi
+    section=mysqld
+    if [[ "$major" -ge 11 ]]; then
+        section=mariadbd
+    fi
+    cat >/etc/mysql/conf.d/dcdr.cnf <<EOL
+[$section]
+read_only=ON
+server_id=${DCDR_SERVER_ID:?DCDR_SERVER_ID is required with DCDR_ENABLED}
+log_bin=/var/lib/mysql/mariadb-bin
+log_slave_updates=ON
+wsrep_gtid_mode=ON
+wsrep_gtid_domain_id=${domain_id}
+gtid_domain_id=$((domain_id + 1))
+binlog_ignore_db=kubedb_system
+skip_slave_start=ON
+binlog_expire_logs_seconds=${DCDR_BINLOG_EXPIRE_SECONDS:-604800}
+EOL
+    log "INFO" "DC-DR: booting fenced (read_only=ON), server_id=$DCDR_SERVER_ID, wsrep_gtid_domain_id=$domain_id"
+fi
+
 if [[ $WSREP_SST_METHOD == "rsync" ]]; then
     echo "wsrep_sst_method=rsync" >>/etc/mysql/conf.d/galera.cnf
 elif [[ $WSREP_SST_METHOD == "mariabackup" ]]; then
