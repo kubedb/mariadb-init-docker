@@ -12,9 +12,18 @@ function log() {
     echo "$(timestamp) [$script_name] [$type] $msg"
 }
 
+# DC-DR re-seed: a hold set while this script waits ends it, so run.sh holds (and wipes) first
+function exit_if_dcdr_hold() {
+    if [ -f /scripts/dcdr-hold ]; then
+        log "WARNING" "DC-DR re-seed hold requested; leaving on-start"
+        exit 0
+    fi
+}
+
 # wait for the peer-list file created by coordinator
 log "WARNING" "waiting for peer-list file to come"
 while [ ! -f "/scripts/peer-list" ]; do
+    exit_if_dcdr_hold
     sleep 1
 done
 
@@ -128,9 +137,19 @@ wsrep_sst_auth=$MYSQL_ROOT_USERNAME:$MYSQL_ROOT_PASSWORD
 wsrep_sst_donor=all,  # https://mariadb.com/kb/en/mariabackup-sst-method/#choosing-a-donor-node" >>/etc/mysql/conf.d/galera.cnf
 fi
 
+# Reserved admin listener. Connections on extra_port are not counted against
+# max_connections, so the KubeDB operator and the coordinator can always reach
+# the database, while application clients are still limited by max_connections.
+cat >/etc/mysql/conf.d/reserved-connection.cnf <<EOL
+[mysqld]
+extra_port=${EXTRA_PORT:-3307}
+extra_max_connections=${EXTRA_MAX_CONNECTIONS:-16}
+EOL
+
 # wait for the pre script copied by coordinator
 log "WARNING" "waiting for pre-run-on-present script to come"
 while [ ! -f "/run-script/pre-run-on-present.sh" ]; do
+    exit_if_dcdr_hold
     sleep 1
 done
 
@@ -142,6 +161,7 @@ log "INFO" "found pre-run-on-present script"
 # wait for the script copied by coordinator
 log "WARNING" "waiting for run-on-present script to come"
 while [ ! -f "/run-script/run-on-present.sh" ]; do
+    exit_if_dcdr_hold
     sleep 1
 done
 
